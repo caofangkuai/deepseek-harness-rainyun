@@ -4,7 +4,9 @@
 #   1. Put this workflow in .github/workflows/ of your GitHub repo
 #      (e.g. fork of this docker/ directory).
 #   2. The job uses the built-in GITHUB_TOKEN with packages: write.
-#   3. Push a tag like v0.2.2-rc.1 — or run it manually via Actions -> Run workflow.
+#   3. Push a tag like v0.2.2-rc.1 or v0.2.2-rc.1-fix1 — or run it manually
+#      via Actions -> Run workflow. Tags with a -fixN suffix install the base
+#      npm version and publish the full tag as the image tag.
 #
 # The image is published to ghcr.io; use that reference in the RainYun RCA
 # template's 镜像 field.
@@ -18,6 +20,10 @@ on:
         description: 'npm version of @deepseek-ai/dsh to install (e.g. 0.2.2-rc.1)'
         required: true
         default: '0.2.2-rc.1'
+      image_tag:
+        description: 'Image tag to publish (empty = same as dsh_version)'
+        required: false
+        default: ''
   push:
     tags:
       - 'v*'
@@ -38,11 +44,15 @@ jobs:
         id: version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "dsh_version=${{ inputs.dsh_version }}" >> "$GITHUB_OUTPUT"
-            echo "image_tag=${{ inputs.dsh_version }}" >> "$GITHUB_OUTPUT"
+            V="${{ inputs.dsh_version }}"
+            T="${{ inputs.image_tag }}"
+            echo "dsh_version=$V" >> "$GITHUB_OUTPUT"
+            echo "image_tag=${T:-$V}" >> "$GITHUB_OUTPUT"
           else
             V="${GITHUB_REF_NAME#v}"
-            echo "dsh_version=$V" >> "$GITHUB_OUTPUT"
+            # Tags may carry a local build suffix (0.2.2-rc.1-fix1): install the
+            # upstream npm version, but publish the full tag as the image tag.
+            echo "dsh_version=${V%-fix*}" >> "$GITHUB_OUTPUT"
             echo "image_tag=$V" >> "$GITHUB_OUTPUT"
           fi
 

@@ -5,6 +5,8 @@
 #   GHCR_USERNAME=<user> GHCR_TOKEN=<token> ./push.sh
 #   ./push.sh <username> <token>                 # positional alternative
 #   DSH_VERSION=<version> ./push.sh ...          # push a different build
+#   IMAGE_TAG=<tag> ./push.sh ...                # publish under a different tag
+#                                                # (e.g. 0.2.2-rc.1-fix1)
 #
 # Versioning policy: image tags ALWAYS match the upstream npm version of
 # @deepseek-ai/dsh (e.g. 0.2.2-rc.1). No patch suffixes. Bump the tag only
@@ -18,6 +20,7 @@ set -euo pipefail
 USERNAME="${1:-${GHCR_USERNAME:-}}"
 TOKEN="${2:-${GHCR_TOKEN:-}}"
 DSH_VERSION="${DSH_VERSION:-0.2.2-rc.1}"
+IMAGE_TAG="${IMAGE_TAG:-$DSH_VERSION}"
 REGISTRY="ghcr.io"
 LOCAL_IMAGE="deepseek-harness:${DSH_VERSION}"
 REMOTE_IMAGE="${REGISTRY}/${USERNAME}/deepseek-harness"
@@ -32,18 +35,18 @@ if ! docker image inspect "$LOCAL_IMAGE" >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "==> tagging $REMOTE_IMAGE:${DSH_VERSION} and :latest"
-docker tag "$LOCAL_IMAGE" "$REMOTE_IMAGE:${DSH_VERSION}"
+echo "==> tagging $REMOTE_IMAGE:${IMAGE_TAG} and :latest"
+docker tag "$LOCAL_IMAGE" "$REMOTE_IMAGE:${IMAGE_TAG}"
 docker tag "$LOCAL_IMAGE" "$REMOTE_IMAGE:latest"
 
 echo "==> logging in to ghcr.io (token)"
 echo "$TOKEN" | docker login "$REGISTRY" --username "$USERNAME" --password-stdin
 
 echo "==> pushing"
-docker push "$REMOTE_IMAGE:${DSH_VERSION}"
+docker push "$REMOTE_IMAGE:${IMAGE_TAG}"
 docker push "$REMOTE_IMAGE:latest"
 
 echo "==> done:"
-echo "   ${REMOTE_IMAGE}:${DSH_VERSION}"
+echo "   ${REMOTE_IMAGE}:${IMAGE_TAG}"
 echo "   ${REMOTE_IMAGE}:latest"
-echo "用此地址在雨云 RCA 模板「镜像」字段填写: ${REMOTE_IMAGE}:${DSH_VERSION}"
+echo "用此地址在雨云 RCA 模板「镜像」字段填写: ${REMOTE_IMAGE}:${IMAGE_TAG}"
