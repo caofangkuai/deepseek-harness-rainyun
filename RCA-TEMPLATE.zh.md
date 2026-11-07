@@ -40,6 +40,7 @@
 | `PORT` | `3080` | 服务监听端口，与 Services 内部端口一致 |
 | `DSH_HOME` | `/data` | 数据目录，与 VolumeMounts 挂载路径一致 |
 | `DSH_TELEMETRY_DISABLED` | `1` | 关闭遥测 |
+| `DSH_PUBLIC_ORIGIN` | 空 | 可选。账号登录时浏览器访问的公开 origin（如 `https://dsh.example.com` 或 `http://1.2.3.4:3080`，多个用逗号分隔）。仅当 DeepSeek Platform 接受该 `redirect_uri` 时生效；被拒绝时请用 SSH 本地转发或 `local-proxy.mjs` |
 
 ## 5. 版本 — VolumeMounts 持久化卷挂载
 
@@ -110,6 +111,7 @@
 | 页面能打开但反复跳登录/401 | 重启后旧 dsh cookie 签名失效 | 网关会自动清旧 cookie 重试；仍失败则重启容器，或清除浏览器站点数据 |
 | 日志报 `host "0.0.0.0" is an unspecified (wildcard) address` | 旧镜像的 legacy 直连模式 | 升级镜像；dsh 0.2.2+ 只允许绑定回环地址，公网统一走网关 |
 | agent 无法执行命令，报 `SANDBOX_UNAVAILABLE` | 雨云运行环境不支持 Landlock/bwrap 沙箱 | 联系雨云确认内核版本与安全上下文支持；Landlock 需内核 5.13+ |
+| 点 DeepSeek 账号登录立即显示“登录失败” | dsh 默认只允许 loopback HTTP 回调；公网 origin 未放行，或 Platform 拒绝公网 `redirect_uri` | 设置 `DSH_PUBLIC_ORIGIN` 为浏览器实际访问的完整 origin 后重启；仍失败则用 SSH 本地转发或 `local-proxy.mjs` |
 
 ## 13. 密码登录（默认开启，镜像内置鉴权网关）
 
@@ -118,6 +120,7 @@
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
 | `DSH_AUTH` | `1` | `1`=启用密码登录（默认）；`0`=关闭密码（网关转为透传，公网端口仍由网关监听） |
+| `DSH_PUBLIC_ORIGIN` | 空 | 可选。放行公开 OAuth 回调来源；留空仅允许 loopback。是否可用取决于 Platform 策略 |
 
 - **首次使用**：打开公网地址 → 自动跳转"设置密码"页 → 设置密码（至少 8 位）→ 之后每次访问需登录（会话 30 天有效）。
 - **数据位置**：密码与密钥存在持久卷 `/data/auth/`（重启不丢）。

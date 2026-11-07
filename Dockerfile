@@ -52,6 +52,13 @@ COPY --from=dsh-install /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY patch-trust-fence.mjs /usr/local/bin/
 RUN node /usr/local/bin/patch-trust-fence.mjs
 
+# Optional remote account login: dsh only accepts a loopback OAuth callback
+# origin by default. Setting DSH_PUBLIC_ORIGIN to the browser-visible origin
+# also accepts that origin. The DeepSeek Platform must accept the resulting
+# redirect_uri; loopback / SSH forwarding remains the documented path.
+COPY patch-remote-oauth.mjs /usr/local/bin/
+RUN node /usr/local/bin/patch-remote-oauth.mjs
+
 # Built-in password gate (default on via DSH_AUTH=1, see docker-entrypoint.sh):
 # first visit registers a password, afterwards login is required. dsh itself
 # binds only 127.0.0.1; the gate owns the public port.
