@@ -71,7 +71,7 @@ GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](h
 
 | Tag | 说明 |
 |---|---|
-| `0.2.2-rc.1-fix3` | **当前推荐**：0.2.2-rc.1 + WebSocket 修复 + 远程 OAuth 补丁（放行任意 HTTP(S) origin） |
+| `0.2.2-rc.1-fix3` | **当前推荐**：0.2.2-rc.1 + WebSocket 修复 + 远程 OAuth 补丁（dsh 侧放行任意 HTTP(S) origin；Platform 仍拒绝公网回调，公开账号登录不可用） |
 | `0.2.2-rc.1-fix2` | 0.2.2-rc.1 + WebSocket 修复 + 远程 OAuth 补丁（仅 `DSH_PUBLIC_ORIGIN` 白名单） |
 | `0.2.2-rc.1-fix1` | 0.2.2-rc.1 + WebSocket 修复 |
 | `0.2.2-rc.1` | 上游 npm 版本 tag |
@@ -95,7 +95,7 @@ GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](h
 
 > dsh 0.2.2+ 拒绝绑定 `0.0.0.0`，因此无论是否开启密码，dsh 都只监听容器回环地址，公网始终由网关进入。网关会自动改写 Host 并剥离 Origin，`DSH_TRUSTED_HOSTS` / `DSH_TRUST_FENCE` 不再需要（旧配置保留也无副作用）。
 >
-> 账号登录：镜像内置补丁移除了 dsh 的 loopback-only 回调校验，接受任意 HTTP(S) origin 作为 OAuth `redirect_uri`。DeepSeek Platform 是否接受公网 `redirect_uri` 需实际验证；若容器日志出现 `[deepseek-account] sign-in failed`，请使用 SSH 本地转发（`ssh -N -L 3080:127.0.0.1:3080 root@服务器`）或 `local-proxy.mjs`。补丁会让任意 origin 收到授权码，PKCE 仍保护换取环节，仅建议在自有部署使用。
+> 账号登录：镜像内置补丁移除了 dsh 的 loopback-only 回调校验，接受任意 HTTP(S) origin。实测 DeepSeek Platform 仍拒绝公网 `redirect_uri`：容器日志会出现 `[deepseek-account] response rejected`，`path: /auth-api/v0/dsh/auth_init`、`status: 200`、`stage: envelope`、`issues: invalid_value + invalid_type`。公开登录不可用。请使用 SSH 本地转发（`ssh -N -L 13080:127.0.0.1:3080 root@服务器`，浏览器打开 `http://127.0.0.1:13080`）或在本机运行 `node local-proxy.mjs https://<公网地址> 13080` 后打开 `http://127.0.0.1:13080`；浏览器 origin 为 loopback 时 Platform 才会接受。补丁会让任意 origin 收到授权码，PKCE 仍保护换取环节，仅建议在自有部署使用。
 
 ---
 
