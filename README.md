@@ -71,7 +71,8 @@ GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](h
 
 | Tag | 说明 |
 |---|---|
-| `0.2.2-rc.1-fix2` | **当前推荐**：0.2.2-rc.1 + WebSocket 修复 + 远程 OAuth 补丁（`DSH_PUBLIC_ORIGIN`） |
+| `0.2.2-rc.1-fix3` | **当前推荐**：0.2.2-rc.1 + WebSocket 修复 + 远程 OAuth 补丁（放行任意 HTTP(S) origin） |
+| `0.2.2-rc.1-fix2` | 0.2.2-rc.1 + WebSocket 修复 + 远程 OAuth 补丁（仅 `DSH_PUBLIC_ORIGIN` 白名单） |
 | `0.2.2-rc.1-fix1` | 0.2.2-rc.1 + WebSocket 修复 |
 | `0.2.2-rc.1` | 上游 npm 版本 tag |
 | `latest` | 跟随最新构建 |
@@ -88,14 +89,13 @@ GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](h
 | `DSH_HOME` | `/data` | 数据目录，**务必挂卷**（设置、密钥、会话、profiles、密码都在这里） |
 | `DSH_AUTH` | `1` | 密码登录开关：`1`=开启（默认），`0`=关闭密码（网关转为透传，仍由网关监听公网端口） |
 | `DSH_AUTH_PASSWORD` | 空 | **推荐**：预置登录密码。密码保存在部署配置里而非仅卷中——即使卷数据被重置（雨云重建容器），重启后也会自动恢复该密码，不会回到"设置密码"页。不填则首次访问注册 |
-| `DSH_PUBLIC_ORIGIN` | 空 | 可选。远程账号登录时浏览器访问的公开 origin（如 `https://dsh.example.com` 或 `http://1.2.3.4:3080`，多个用逗号分隔）。留空时只允许 loopback 回调（官方默认）。是否生效取决于 DeepSeek Platform 是否接受该 `redirect_uri`；Platform 拒绝时请改用 SSH 本地转发或 `local-proxy.mjs` |
 | `DSH_TELEMETRY_DISABLED` | `1` | 关闭遥测 |
 | `DEEPSEEK_API_KEY` | 空 | 可选，模型密钥（也可在 Web UI 配置） |
 | `DSH_RUNTIME_UID` / `DSH_RUNTIME_GID` | `0` | 运行用户，默认 root；设为非零（如 `1000`）则降权运行，入口会自动修复卷属主 |
 
 > dsh 0.2.2+ 拒绝绑定 `0.0.0.0`，因此无论是否开启密码，dsh 都只监听容器回环地址，公网始终由网关进入。网关会自动改写 Host 并剥离 Origin，`DSH_TRUSTED_HOSTS` / `DSH_TRUST_FENCE` 不再需要（旧配置保留也无副作用）。
 >
-> 账号登录默认只接受 loopback HTTP 回调（官方限制，见 `dsh-deepseek-account-platform` README）。设置 `DSH_PUBLIC_ORIGIN` 后镜像会额外放行该公开 origin；Platform 是否接受公网 `redirect_uri` 需实际验证。若容器日志出现 `[deepseek-account] sign-in failed`，请使用 SSH 本地转发（`ssh -N -L 3080:127.0.0.1:3080 root@服务器`）或 `local-proxy.mjs`。
+> 账号登录：镜像内置补丁移除了 dsh 的 loopback-only 回调校验，接受任意 HTTP(S) origin 作为 OAuth `redirect_uri`。DeepSeek Platform 是否接受公网 `redirect_uri` 需实际验证；若容器日志出现 `[deepseek-account] sign-in failed`，请使用 SSH 本地转发（`ssh -N -L 3080:127.0.0.1:3080 root@服务器`）或 `local-proxy.mjs`。补丁会让任意 origin 收到授权码，PKCE 仍保护换取环节，仅建议在自有部署使用。
 
 ---
 
@@ -163,7 +163,7 @@ GHCR_USERNAME=<用户> GHCR_TOKEN=<令牌> DSH_VERSION=0.2.2-rc.1 ./push.sh
 ├── auth-proxy.js               # 内置密码登录网关（零依赖，首次注册+登录+会话；DSH_AUTH=0 时透传）
 ├── polyfill-randomuuid.mjs     # 旧版（<=0.1.0-rc.6）兼容垫片，当前构建不注入
 ├── patch-trust-fence.mjs       # 构建期补丁：可选关闭 /api 信任围栏（DSH_TRUST_FENCE=0 构建参数）
-├── patch-remote-oauth.mjs      # 构建期补丁：DSH_PUBLIC_ORIGIN 放行公开 OAuth 回调来源
+├── patch-remote-oauth.mjs      # 构建期补丁：移除 OAuth 回调的 loopback 限制
 ├── local-proxy.mjs             # 可选：在浏览器本机把 loopback 转发到远端网关
 ├── smoke-test.sh               # 一键冒烟测试
 ├── push.sh                     # 一键发布脚本

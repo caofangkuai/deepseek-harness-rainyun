@@ -52,10 +52,10 @@ COPY --from=dsh-install /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY patch-trust-fence.mjs /usr/local/bin/
 RUN node /usr/local/bin/patch-trust-fence.mjs
 
-# Optional remote account login: dsh only accepts a loopback OAuth callback
-# origin by default. Setting DSH_PUBLIC_ORIGIN to the browser-visible origin
-# also accepts that origin. The DeepSeek Platform must accept the resulting
-# redirect_uri; loopback / SSH forwarding remains the documented path.
+# Remote account login: dsh only accepts a loopback OAuth callback origin by
+# default. The patch removes that check and accepts any HTTP(S) origin. The
+# DeepSeek Platform must also accept the resulting redirect_uri; loopback /
+# SSH forwarding remains the documented fallback.
 COPY patch-remote-oauth.mjs /usr/local/bin/
 RUN node /usr/local/bin/patch-remote-oauth.mjs
 
