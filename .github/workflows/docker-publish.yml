@@ -3,13 +3,11 @@
 # Usage:
 #   1. Put this workflow in .github/workflows/ of your GitHub repo
 #      (e.g. fork of this docker/ directory).
-#   2. Add repository secrets:
-#        DOCKERHUB_USERNAME  (Docker Hub user)
-#        DOCKERHUB_TOKEN     (Docker Hub access token, Read/Write/Delete)
-#   3. Push a tag like v0.1.0-rc.6 — or run it manually via Actions -> Run workflow.
+#   2. The job uses the built-in GITHUB_TOKEN with packages: write.
+#   3. Push a tag like v0.2.2-rc.1 — or run it manually via Actions -> Run workflow.
 #
-# The image is published to both Docker Hub and ghcr.io; either is usable in
-# the RainYun RCA template's 镜像 field.
+# The image is published to ghcr.io; use that reference in the RainYun RCA
+# template's 镜像 field.
 
 name: docker-publish
 
@@ -17,9 +15,9 @@ on:
   workflow_dispatch:
     inputs:
       dsh_version:
-        description: 'npm version of @deepseek-ai/dsh to install (e.g. 0.1.0-rc.6)'
+        description: 'npm version of @deepseek-ai/dsh to install (e.g. 0.2.2-rc.1)'
         required: true
-        default: '0.1.0-rc.6'
+        default: '0.2.2-rc.1'
   push:
     tags:
       - 'v*'
@@ -53,14 +51,15 @@ jobs:
       - name: Build image
         uses: docker/build-push-action@v6
         with:
-          context: ./docker
-          file: ./docker/Dockerfile
+          context: .
+          file: ./Dockerfile
           build-args: DSH_VERSION=${{ steps.version.outputs.dsh_version }}
           load: true
           tags: ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }}
 
-      - name: Smoke test (auth mode boot + login + legacy)
+      - name: Smoke test (auth mode boot + login)
         run: |
+          set -euo pipefail
           docker run -d --name smoke -p 3081:3080 -e DSH_HOME=/data -e PORT=3080 \
             -e DSH_AUTH_PASSWORD=SmokePass123 \
             ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }}
@@ -71,24 +70,11 @@ jobs:
           docker logs smoke 2>&1 | grep -q 'auth] gate listening'
           # unauthenticated API must be refused by the gate
           curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3081/api/health | grep -q '401'
-          # login then the SPA must serve
-          curl -s -D /tmp/h -o /dev/null -X POST -d 'password=SmokePass123' http://127.0.0.1:3081/login
-          COOKIE=$(grep -i '^set-cookie:' /tmp/h | sed 's/^[Ss]et-[Cc]ookie: //' | cut -d';' -f1)
-          curl -s -H "Cookie: $COOKIE" http://127.0.0.1:3081/ | grep -q '__DSH_BOOT__'
+          # login, then follow dsh's launch-token redirect with the cookie jar
+          JAR=$(mktemp)
+          curl -s -c "$JAR" -o /dev/null -X POST -d 'password=SmokePass123' http://127.0.0.1:3081/login
+          curl -s -L -b "$JAR" -c "$JAR" http://127.0.0.1:3081/ | grep -q '__DSH_BOOT__'
           docker rm -f smoke >/dev/null
-
-      - name: Push to Docker Hub
-        if: env.DOCKERHUB_USERNAME != ''
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          echo "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
-          TAG=${{ steps.version.outputs.image_tag }}
-          docker tag ${{ env.IMAGE_NAME }}:$TAG $DOCKERHUB_USERNAME/${{ env.IMAGE_NAME }}:$TAG
-          docker tag ${{ env.IMAGE_NAME }}:$TAG $DOCKERHUB_USERNAME/${{ env.IMAGE_NAME }}:latest
-          docker push $DOCKERHUB_USERNAME/${{ env.IMAGE_NAME }}:$TAG
-          docker push $DOCKERHUB_USERNAME/${{ env.IMAGE_NAME }}:latest
 
       - name: Push to ghcr.io
         env:

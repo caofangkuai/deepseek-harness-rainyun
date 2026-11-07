@@ -10,9 +10,14 @@
 // authentication layer, so with the fence off anyone who can reach the port
 // can use it — document this to your users.
 import { readFileSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 
-const file = '/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-connection/lib/index.js'
 const MARK = 'DSH_TRUST_FENCE'
+// dsh-web-app is a direct dependency of the dsh CLI and itself depends on
+// dsh-client-connection, so resolving from its package root finds the module
+// regardless of how npm nests the tree.
+const require = createRequire('/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/package.json')
+const file = require.resolve('@deepseek-ai/dsh-client-connection')
 const src = readFileSync(file, 'utf8')
 
 if (src.includes(MARK)) {
@@ -20,13 +25,11 @@ if (src.includes(MARK)) {
   process.exit(0)
 }
 
-const needle = 'function isTrustedApiRequest(request, trustedHosts) {'
-const idx = src.indexOf(needle)
-if (idx === -1) throw new Error('[trust-fence] anchor not found in ' + file)
+const anchor = /function isTrustedApiRequest\(request, trustedHosts[^)]*\)\s*\{/
+if (!anchor.test(src)) throw new Error('[trust-fence] anchor not found in ' + file)
 
-const inject =
-  needle +
+const patch =
   '\n\tif (typeof process !== "undefined" && (process.env.DSH_TRUST_FENCE === "0" || process.env.DSH_TRUST_FENCE === "false" || process.env.DSH_TRUST_FENCE === "off")) return true;'
 
-writeFileSync(file, src.slice(0, idx) + inject + src.slice(idx + needle.length))
+writeFileSync(file, src.replace(anchor, (m) => m + patch))
 console.log('[trust-fence] patched isTrustedApiRequest with DSH_TRUST_FENCE opt-out')

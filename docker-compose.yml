@@ -12,7 +12,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: deepseek-harness:0.1.0-rc.6
+    image: deepseek-harness:0.2.2-rc.1
     container_name: dsh
     restart: unless-stopped
     ports:

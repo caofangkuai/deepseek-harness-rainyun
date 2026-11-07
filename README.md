@@ -1,11 +1,11 @@
 # DeepSeek Harness Docker · 雨云一键部署版
 
-[![Docker Image](https://img.shields.io/badge/docker-keke0904%2Fdeepseek--harness-2496ed?logo=docker&logoColor=white)](https://hub.docker.com/r/keke0904/deepseek-harness)
+[![Container Image](https://img.shields.io/badge/ghcr.io-caofangkuai%2Fdeepseek--harness-2496ed?logo=github&logoColor=white)](https://github.com/caofangkuai/deepseek-harness/pkgs/container/deepseek-harness)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`，DeepSeek AI 官方开源的 Agent 智能体框架，**一切皆插件**）Web UI 的 Docker 镜像，开箱即用，支持**雨云云应用（RCA）一键部署**。
 
-> 面向个人使用做了三处增强：内置密码登录、持久卷权限自愈、旧浏览器兼容——同时保持 dsh 本体非 root 运行 + Landlock 沙箱的安全基线。
+> 面向个人使用做了三处增强：内置密码登录、持久卷权限自愈、默认 root 运行（可用 `DSH_RUNTIME_UID` 切换非 root），bash 工具仍走 Landlock 沙箱。
 
 ---
 
@@ -17,7 +17,7 @@
 | 💾 **持久卷自愈** | 自动修复 root 属主卷（K8s/雨云不继承镜像属主的问题），幂等、重启不重复 chown |
 | 🌐 **免配置公网访问** | 鉴权模式下 dsh 只监听回环地址，网关自动处理 Host/Origin，无需填公网地址 |
 | 🧩 **旧浏览器兼容** | 注入 `crypto.randomUUID` polyfill（微信内置浏览器等旧 WebView 也能用） |
-| 🔒 **非 root + 沙箱** | 降权 uid 1000 运行，bash 工具走 Landlock 沙箱（full），绝不无沙箱执行 |
+| 🔒 **默认 root 运行** | dsh 与鉴权网关默认以 root 启动；如需降权设置 `DSH_RUNTIME_UID=1000`，bash 工具仍走 Landlock 沙箱 |
 | 🚀 **多阶段构建** | 基于 npm 官方包 `@deepseek-ai/dsh`，原生依赖构建期编译，运行镜像精简 |
 
 ---
@@ -28,7 +28,7 @@
 docker run -d --name dsh \
   -p 3080:3080 \
   -v dsh-data:/data \
-  keke0904/deepseek-harness:0.1.0-rc.6
+  ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1
 ```
 
 打开 http://localhost:3080 ：
@@ -44,7 +44,7 @@ docker run -d --name dsh \
 ```yaml
 services:
   dsh:
-    image: keke0904/deepseek-harness:0.1.0-rc.6
+    image: ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1
     container_name: dsh
     restart: unless-stopped
     ports:
@@ -67,11 +67,11 @@ volumes:
 
 ## 📦 镜像
 
-Docker Hub（公开）：[keke0904/deepseek-harness](https://hub.docker.com/r/keke0904/deepseek-harness)
+GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](https://github.com/caofangkuai/deepseek-harness/pkgs/container/deepseek-harness)
 
 | Tag | 说明 |
 |---|---|
-| `0.1.0-rc.6` | **当前推荐**：与上游 npm 版本一致（含密码登录 + 全部修复） |
+| `0.2.2-rc.1` | **当前推荐**：与上游 npm 版本一致（含密码登录 + 全部修复） |
 | `latest` | 跟随最新构建 |
 
 > **版本策略**：镜像 tag 与上游 `@deepseek-ai/dsh` 的 npm 版本号保持一致，不附加后缀；只有上游发新版时才换 tag。同 tag 被重新推送时，雨云等按 tag 缓存的平台可能不会自动拉新——如需强制更新，把镜像字段临时改为 `latest` 或删除应用重建。
@@ -82,17 +82,15 @@ Docker Hub（公开）：[keke0904/deepseek-harness](https://hub.docker.com/r/ke
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `PORT` | `3080` | 公网监听端口（鉴权网关）；改端口需同时删除 `$DSH_HOME/profiles/web/cordis.patch.yml` 后重启（该文件首启写入并固定内部端口） |
+| `PORT` | `3080` | 公网监听端口（网关）；改端口后重启会自动更新 `cordis.patch.yml` 的托管行，无需删文件 |
 | `DSH_HOME` | `/data` | 数据目录，**务必挂卷**（设置、密钥、会话、profiles、密码都在这里） |
-| `DSH_AUTH` | `1` | 密码登录开关：`1`=开启（默认），`0`=关闭（回到无鉴权模式） |
+| `DSH_AUTH` | `1` | 密码登录开关：`1`=开启（默认），`0`=关闭密码（网关转为透传，仍由网关监听公网端口） |
 | `DSH_AUTH_PASSWORD` | 空 | **推荐**：预置登录密码。密码保存在部署配置里而非仅卷中——即使卷数据被重置（雨云重建容器），重启后也会自动恢复该密码，不会回到"设置密码"页。不填则首次访问注册 |
 | `DSH_TELEMETRY_DISABLED` | `1` | 关闭遥测 |
 | `DEEPSEEK_API_KEY` | 空 | 可选，模型密钥（也可在 Web UI 配置） |
-| `DSH_RUNTIME_UID` / `DSH_RUNTIME_GID` | `1000` | 覆盖运行用户（需与卷属主匹配，一般不用改） |
-| `DSH_TRUSTED_HOSTS` | 空 | 仅 `DSH_AUTH=0` 时使用：空格分隔的裸 `host[:port]`（如 `38.246.252.220:9990`），会自动清洗 `http://`/路径/斜杠 |
-| `DSH_TRUST_FENCE` | 空 | 仅 `DSH_AUTH=0` 时使用：设 `0` 关闭 /api 信任围栏（免配置直连）；默认开启需配 `DSH_TRUSTED_HOSTS` |
+| `DSH_RUNTIME_UID` / `DSH_RUNTIME_GID` | `0` | 运行用户，默认 root；设为非零（如 `1000`）则降权运行，入口会自动修复卷属主 |
 
-> 鉴权模式（默认）下 `DSH_TRUSTED_HOSTS` 与 `DSH_TRUST_FENCE` 都不需要。
+> dsh 0.2.2+ 拒绝绑定 `0.0.0.0`，因此无论是否开启密码，dsh 都只监听容器回环地址，公网始终由网关进入。网关会自动改写 Host 并剥离 Origin，`DSH_TRUSTED_HOSTS` / `DSH_TRUST_FENCE` 不再需要（旧配置保留也无副作用）。
 
 ---
 
@@ -104,7 +102,7 @@ Docker Hub（公开）：[keke0904/deepseek-harness](https://hub.docker.com/r/ke
 
 | 项 | 值 |
 |---|---|
-| 镜像 | `keke0904/deepseek-harness:0.1.0-rc.6` |
+| 镜像 | `ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1` |
 | 最小资源 | 1 核 / 512MB（推荐 1核1GB+） |
 | Env | `DSH_HOME=/data`、`PORT=3080`、`DSH_TELEMETRY_DISABLED=1` |
 | 持久卷 | 挂载路径 `/data`（与 DSH_HOME 一致），子路径 `dsh`，目录类型 |
@@ -125,18 +123,18 @@ Docker Hub（公开）：[keke0904/deepseek-harness](https://hub.docker.com/r/ke
 ## 🔨 本地构建 / 测试 / 发布
 
 ```sh
-# 构建（默认 npm 包 0.1.0-rc.6；换版本：--build-arg DSH_VERSION=<version>）
-docker build -t deepseek-harness:0.1.0-rc.6 .
+# 构建（默认 npm 包 0.2.2-rc.1；换版本：--build-arg DSH_VERSION=<version>）
+docker build -t deepseek-harness:0.2.2-rc.1 .
 
 # 冒烟测试（网关/登录/沙箱/持久化/legacy/健康，全过才退出 0）
-./smoke-test.sh deepseek-harness:0.1.0-rc.6
+./smoke-test.sh deepseek-harness:0.2.2-rc.1
 
-# 推送新 tag 到 Docker Hub
-DOCKERHUB_USERNAME=<用户> DOCKERHUB_TOKEN=<访问令牌> DSH_VERSION=0.1.0-rc.6 ./push.sh
+# 推送新 tag 到 GitHub Container Registry
+GHCR_USERNAME=<用户> GHCR_TOKEN=<令牌> DSH_VERSION=0.2.2-rc.1 ./push.sh
 ```
 
-- 访问令牌在 https://hub.docker.com/settings/security 创建（Read/Write/Delete）。
-- **CI 自动发布（可选）**：`.github/workflows/docker-publish.yml` 配置 `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` 两个 Secrets 后，打 `v*` tag 或手动触发即自动构建 → 冒烟 → 推送 Docker Hub + ghcr.io。
+- 令牌需要 `write:packages` 权限（PAT 在 https://github.com/settings/tokens 创建；GitHub App 令牌用用户名 `x-access-token`）。
+- **CI 自动发布（可选）**：`.github/workflows/docker-publish.yml` 配置 `GHCR_TOKEN` 等 Secrets 后，打 `v*` tag 或手动触发即自动构建 → 冒烟 → 推送 ghcr.io。
 
 ---
 
@@ -144,9 +142,9 @@ DOCKERHUB_USERNAME=<用户> DOCKERHUB_TOKEN=<访问令牌> DSH_VERSION=0.1.0-rc.
 
 | 现象 | 原因 / 解决 |
 |---|---|
-| 日志报 `mkdir: cannot create directory '/data/profiles': Permission denied` | 旧镜像的已知问题；用当前镜像（`0.1.0-rc.6`）重新部署即自动修复。若雨云仍用缓存旧镜像（同 tag 更新不自动拉新），把镜像字段临时改为 `latest` 或删除应用重建 |
-| 报 `trustedHosts entry "http://..." is not a bare host` | 鉴权模式无需此变量；若关闭鉴权，`DSH_TRUSTED_HOSTS` 只填裸 `host[:port]`（新版本会自动清洗 URL 格式） |
-| 页面报 `crypto.randomUUID is not a function` | 旧浏览器/微信内置浏览器；用新版镜像（已内置 polyfill），或换 Chrome/Edge/Firefox/Safari 新版 |
+| 日志报 `mkdir: cannot create directory '/data/profiles': Permission denied` | 旧镜像的已知问题；用当前镜像（`0.2.2-rc.1`）重新部署即自动修复。若雨云仍用缓存旧镜像（同 tag 更新不自动拉新），把镜像字段临时改为 `latest` 或删除应用重建 |
+| 报 `trustedHosts entry "http://..." is not a bare host` | 旧镜像才需要 `DSH_TRUSTED_HOSTS`；当前镜像的网关会自动处理 Host/Origin，删除该变量并升级镜像即可 |
+| 页面报 `crypto.randomUUID is not a function` | 仅旧版 dsh（<=0.1.0-rc.6）需要 polyfill；0.2.2-rc.1 已不再调用该 API，升级镜像即可解决 |
 | agent 无法执行命令，报 `SANDBOX_UNAVAILABLE` | 宿主内核不支持 Landlock（5.13+）；确认容器安全上下文是否放行 |
 | 登录失败 10 次被锁 | 防爆破机制，5 分钟后自动解锁 |
 
@@ -155,11 +153,11 @@ DOCKERHUB_USERNAME=<用户> DOCKERHUB_TOKEN=<访问令牌> DSH_VERSION=0.1.0-rc.
 ## 📁 目录结构
 
 ```
-├── Dockerfile                  # 多阶段构建（node:22-trixie-slim + npm 官方包）
-├── docker-entrypoint.sh        # 入口：卷属主自愈 → profile 补丁 → 降权启动
-├── auth-proxy.js               # 内置密码登录网关（零依赖，首次注册+登录+会话）
-├── polyfill-randomuuid.mjs     # 构建期注入 crypto.randomUUID 兼容垫片
-├── patch-trust-fence.mjs       # 构建期补丁：DSH_TRUST_FENCE 免配置直连开关
+├── Dockerfile                  # 多阶段构建（node:24-trixie-slim + npm 官方包）
+├── docker-entrypoint.sh        # 入口：卷属主自愈 → profile 补丁 → 回环启动 dsh + 网关
+├── auth-proxy.js               # 内置密码登录网关（零依赖，首次注册+登录+会话；DSH_AUTH=0 时透传）
+├── polyfill-randomuuid.mjs     # 旧版（<=0.1.0-rc.6）兼容垫片，当前构建不注入
+├── patch-trust-fence.mjs       # 构建期补丁：可选关闭 /api 信任围栏（DSH_TRUST_FENCE=0 构建参数）
 ├── smoke-test.sh               # 一键冒烟测试
 ├── push.sh                     # 一键发布脚本
 ├── docker-compose.yml          # 本地一键起服务

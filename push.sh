@@ -1,27 +1,29 @@
 #!/bin/bash
-# push.sh — tag the local image for Docker Hub and push (rc + latest).
+# push.sh — tag the local image for GitHub Container Registry and push (rc + latest).
 #
 # Usage:
-#   DOCKERHUB_USERNAME=<user> DOCKERHUB_TOKEN=<token> ./push.sh
-#   ./push.sh <username> <access-token>          # positional alternative
-#   DSH_VERSION=<version> ./push.sh ...           # push a different build
+#   GHCR_USERNAME=<user> GHCR_TOKEN=<token> ./push.sh
+#   ./push.sh <username> <token>                 # positional alternative
+#   DSH_VERSION=<version> ./push.sh ...          # push a different build
 #
 # Versioning policy: image tags ALWAYS match the upstream npm version of
-# @deepseek-ai/dsh (e.g. 0.1.0-rc.6). No patch suffixes. Bump the tag only
+# @deepseek-ai/dsh (e.g. 0.2.2-rc.1). No patch suffixes. Bump the tag only
 # when upstream publishes a new version; same-tag re-pushes keep the tag.
 #
-# An access token is a "Personal Access Token" with Read/Write/Delete scope,
-# created at https://hub.docker.com/settings/security.
+# The token needs the `write:packages` scope (a GitHub PAT) or the
+# `packages: write` permission (a GitHub App token, username x-access-token).
+# Create a PAT at https://github.com/settings/tokens.
 set -euo pipefail
 
-USERNAME="${1:-${DOCKERHUB_USERNAME:-}}"
-TOKEN="${2:-${DOCKERHUB_TOKEN:-}}"
-DSH_VERSION="${DSH_VERSION:-0.1.0-rc.6}"
+USERNAME="${1:-${GHCR_USERNAME:-}}"
+TOKEN="${2:-${GHCR_TOKEN:-}}"
+DSH_VERSION="${DSH_VERSION:-0.2.2-rc.1}"
+REGISTRY="ghcr.io"
 LOCAL_IMAGE="deepseek-harness:${DSH_VERSION}"
-REMOTE_IMAGE="${USERNAME}/deepseek-harness"
+REMOTE_IMAGE="${REGISTRY}/${USERNAME}/deepseek-harness"
 
 if [ -z "$USERNAME" ] || [ -z "$TOKEN" ]; then
-  echo "usage: DOCKERHUB_USERNAME=... DOCKERHUB_TOKEN=... ./push.sh  (or: ./push.sh <user> <token>)" >&2
+  echo "usage: GHCR_USERNAME=... GHCR_TOKEN=... ./push.sh  (or: ./push.sh <user> <token>)" >&2
   exit 1
 fi
 
@@ -34,8 +36,8 @@ echo "==> tagging $REMOTE_IMAGE:${DSH_VERSION} and :latest"
 docker tag "$LOCAL_IMAGE" "$REMOTE_IMAGE:${DSH_VERSION}"
 docker tag "$LOCAL_IMAGE" "$REMOTE_IMAGE:latest"
 
-echo "==> logging in to Docker Hub (token)"
-echo "$TOKEN" | docker login --username "$USERNAME" --password-stdin
+echo "==> logging in to ghcr.io (token)"
+echo "$TOKEN" | docker login "$REGISTRY" --username "$USERNAME" --password-stdin
 
 echo "==> pushing"
 docker push "$REMOTE_IMAGE:${DSH_VERSION}"
@@ -44,4 +46,4 @@ docker push "$REMOTE_IMAGE:latest"
 echo "==> done:"
 echo "   ${REMOTE_IMAGE}:${DSH_VERSION}"
 echo "   ${REMOTE_IMAGE}:latest"
-echo "用此地址在雨云 RCA 模板「镜像」字段填写: docker.io/${REMOTE_IMAGE}:${DSH_VERSION}"
+echo "用此地址在雨云 RCA 模板「镜像」字段填写: ${REMOTE_IMAGE}:${DSH_VERSION}"

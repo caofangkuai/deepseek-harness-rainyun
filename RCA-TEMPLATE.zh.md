@@ -6,7 +6,7 @@
 ## 0. 前置
 
 - [ ] 已有雨云账号并开通云应用（RCA）能力
-- [ ] 镜像已推送到公网可拉取仓库（见 README 推送章节），本文档以 Docker Hub 为例
+- [ ] 镜像已推送到公网可拉取仓库（见 README 推送章节），本文档以 GitHub Container Registry 为例
 - [ ] 准备一张应用图标（可选，商店展示用）
 
 ## 1. 应用模板（App 模板）
@@ -22,8 +22,8 @@
 
 | 字段 | 值 | 说明 |
 |---|---|---|
-| 版本号 | `0.1.0-rc.6` | 与镜像 tag 保持一致 |
-| 镜像 | `keke0904/deepseek-harness:0.1.0-rc.6` | 已推送到 Docker Hub（公开），也可用 `:latest`。注意：当前为 **linux/amd64** 单架构镜像，雨云 x86_64 节点可直接拉取；若雨云给 arm64 节点，需先构建多架构镜像 |
+| 版本号 | `0.2.2-rc.1` | 与镜像 tag 保持一致 |
+| 镜像 | `ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1` | 已推送到 ghcr.io（公开），也可用 `:latest`。注意：当前为 **linux/amd64** 单架构镜像，雨云 x86_64 节点可直接拉取；若雨云给 arm64 节点，需先构建多架构镜像 |
 | 最小CPU | `1` 核 | Node 服务，1 核可跑 |
 | 最小内存 | `512` MB | 推荐给用户写 1GB，agent 跑任务更从容 |
 
@@ -40,7 +40,6 @@
 | `PORT` | `3080` | 服务监听端口，与 Services 内部端口一致 |
 | `DSH_HOME` | `/data` | 数据目录，与 VolumeMounts 挂载路径一致 |
 | `DSH_TELEMETRY_DISABLED` | `1` | 关闭遥测 |
-| `DSH_TRUSTED_HOSTS` | 来自 Options（见下） | `/api` 信任围栏需要的公网访问地址 |
 
 ## 5. 版本 — VolumeMounts 持久化卷挂载
 
@@ -52,7 +51,7 @@
 | `workspace` | `/workspace` | `workspace` | 目录 | 可选。agent 工作区；不挂则每次重建后工作区为空 |
 
 > 说明：雨云每个项目有共享磁盘，App 挂载的是项目磁盘中的子路径；多个 App 可共用。
-> 容器以非 root 用户（uid 1000）运行，镜像内已预先 chown 好 `/data` 与 `/workspace`，雨云自动创建的卷会继承属主，无需额外配置。
+> 容器默认以 root 运行，镜像内已预先创建 `/data` 与 `/workspace`；如需非 root 运行，设置 `DSH_RUNTIME_UID=1000`，入口会自动修复卷属主。
 
 ## 6. 版本 — Services 服务配置
 
@@ -70,17 +69,15 @@
 | 标签 | 环境变量键 | 类型 | 默认值 | 必填 | 说明 |
 |---|---|---|---|---|---|
 | 模型 API Key | `DEEPSEEK_API_KEY` | 文本/密码 | 空 | 否 | 部署后也可在 Web UI「设置→模型」里填；填了则开箱即用（DeepSeek 提供方默认读取此变量） |
-| 公网访问地址 | `DSH_TRUSTED_HOSTS` | 文本 | 空 | 否 | 裸地址 `域名` 或 `IP:端口`（如 `38.246.252.220:9990`），多个空格分隔。**若同时设置了 `DSH_TRUST_FENCE=0` 则无需填写此项** |
-| 关闭信任围栏 | `DSH_TRUST_FENCE` | 文本 | 空 | 否 | 填 `0` 表示**免配置直连**：任意公网地址都可直接使用，换地址/换端口也不用改任何参数。⚠️ 安全提示：dsh 无登录鉴权，关闭后知道地址的人都能用，建议仅个人/小范围使用；默认不填=围栏开启（需配合 `DSH_TRUSTED_HOSTS`） |
 | 登录密码（推荐） | `DSH_AUTH_PASSWORD` | 文本/密码 | 空 | 否 | **推荐填写**：密码存在模板配置里（不依赖卷）。即使雨云重建容器导致卷数据被重置，重启后也会自动用此值恢复密码，**不会**再回到"设置密码"页。不填则用首次访问注册的方式（卷重置后需重新设置） |
-| 服务端口 | `PORT` | 数字 | `3080` | 否 | 一般无需修改。注意：端口值在**首次启动**时写入 profile 补丁（`/data/profiles/web/cordis.patch.yml`），之后改此选项需删除该文件或编辑其中的 port 值再重启 |
+| 服务端口 | `PORT` | 数字 | `3080` | 否 | 一般无需修改。改端口后重启会自动更新 profile 补丁（`/data/profiles/web/cordis.patch.yml`）的托管行 |
 
-> 提示：`DSH_TRUSTED_HOSTS` 的填写时机是"先部署拿地址、再补填重启"，如果雨云支持 `$` 环境变量引用特殊变量，可尝试用 `$DSH_TRUSTED_HOSTS` 配合文档说明。最简单做法是模板里把该项做成"部署后必看"说明。
+> 说明：dsh 0.2.2+ 拒绝绑定 `0.0.0.0`，镜像会让 dsh 只监听容器回环地址，公网统一经内置网关进入。网关会自动改写 Host 并剥离 Origin，因此**无需填写公网访问地址**，`DSH_TRUSTED_HOSTS` / `DSH_TRUST_FENCE` 也不再需要。
 
 ## 8. 版本 — Scripts（可选）
 
-- 不需要。首次初始化（写 profile 补丁、绑定 0.0.0.0）已由镜像内置入口脚本完成。
-- 若想用雨云的**安装脚本**（initContainer）预置 profile，可参考：在安装镜像 `node:22-slim` 中执行
+- 不需要。首次初始化（写 profile 补丁、启动回环 dsh 与网关）已由镜像内置入口脚本完成。
+- 若想用雨云的**安装脚本**（initContainer）预置 profile，可参考：在安装镜像 `node:24-slim` 中执行
   `mkdir -p /data/profiles/web` 并写入 webserver 补丁（内容见 `docker-entrypoint.sh`）。
 
 ## 9. 特殊环境变量（如有多容器需求）
@@ -99,7 +96,7 @@
 
 ## 11. 部署后验收清单
 
-- [ ] 容器日志出现 `[dsh-entrypoint] starting dsh web on 0.0.0.0:3080`（若首次出现 `fixing ownership of volume roots` 属正常，说明卷属主已自动修复）
+- [ ] 容器日志出现 `[dsh-entrypoint] starting dsh web on 127.0.0.1:3081` 和 `[auth] gate listening on 0.0.0.0:3080`（若首次出现 `fixing ownership of volume roots` 属正常，说明卷属主已自动修复）
 - [ ] 浏览器打开雨云分配的公网地址，首页正常加载（无 /api 403）
 - [ ] 设置→模型 填入 DeepSeek API Key 保存成功
 - [ ] 选择一个工作区，发一条任务（如 `Summarize this repository`）能正常执行 —— 这一步同时验证**进程沙箱**（bash 工具可用）
@@ -109,21 +106,22 @@
 
 | 现象 | 原因 | 解决 |
 |---|---|---|
-| 日志报 `mkdir: cannot create directory '/data/profiles': Permission denied` | 雨云持久卷属主是 root，旧镜像以非 root 直接启动 | 使用最新镜像（已修复：入口自动修复卷属主后降权运行）；或删除应用重建成新镜像 |
-| 页面能打开但接口 403 | `DSH_TRUSTED_HOSTS` 未填公网访问地址 | 在部署参数/环境变量补填雨云分配的公网域名或 `IP:端口`（空格分隔多个）后重启 |
+| 日志报 `mkdir: cannot create directory '/data/profiles': Permission denied` | 旧镜像以非 root 启动且卷属主为 root | 使用最新镜像（默认 root 运行；设 `DSH_RUNTIME_UID=1000` 时入口也会自动修复属主）；或删除应用重建成新镜像 |
+| 页面能打开但反复跳登录/401 | 重启后旧 dsh cookie 签名失效 | 网关会自动清旧 cookie 重试；仍失败则重启容器，或清除浏览器站点数据 |
+| 日志报 `host "0.0.0.0" is an unspecified (wildcard) address` | 旧镜像的 legacy 直连模式 | 升级镜像；dsh 0.2.2+ 只允许绑定回环地址，公网统一走网关 |
 | agent 无法执行命令，报 `SANDBOX_UNAVAILABLE` | 雨云运行环境不支持 Landlock/bwrap 沙箱 | 联系雨云确认内核版本与安全上下文支持；Landlock 需内核 5.13+ |
 
 ## 13. 密码登录（默认开启，镜像内置鉴权网关）
 
-镜像自 `0.1.0-rc.6` 起默认开启密码访问（`DSH_AUTH=1`）：
+镜像自 `0.2.2-rc.1` 起默认开启密码访问（`DSH_AUTH=1`）：
 
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
-| `DSH_AUTH` | `1` | `1`=启用密码登录（默认）；`0`=关闭（回到无鉴权模式） |
+| `DSH_AUTH` | `1` | `1`=启用密码登录（默认）；`0`=关闭密码（网关转为透传，公网端口仍由网关监听） |
 
 - **首次使用**：打开公网地址 → 自动跳转"设置密码"页 → 设置密码（至少 8 位）→ 之后每次访问需登录（会话 30 天有效）。
 - **数据位置**：密码与密钥存在持久卷 `/data/auth/`（重启不丢）。
 - **忘记密码**：删除 `/data/auth/` 下的 `password.json`（或整个 auth 目录）后重启，即回到"首次设置密码"状态。
-- **安全边界**：启用后 dsh 只监听容器回环地址（127.0.0.1），公网只能经鉴权网关进入；`DSH_TRUST_FENCE` / `DSH_TRUSTED_HOSTS` 可不再设置。
+- **安全边界**：无论是否启用密码，dsh 都只监听容器回环地址（127.0.0.1），公网始终经内置网关进入；网关改写 Host 并剥离 Origin，无需设置 `DSH_TRUSTED_HOSTS` / `DSH_TRUST_FENCE`。
 - **防爆破**：登录失败 10 次后锁定该 IP 5 分钟。
 - ⚠️ 网关走明文 HTTP（雨云一般只提供 HTTP），密码经网络传输；若雨云支持 HTTPS/域名证书可更安全。

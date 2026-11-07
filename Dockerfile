@@ -4,21 +4,25 @@
 # Built from the published npm CLI (@deepseek-ai/dsh), which bundles the built
 # frontend (dist) and every profile package, so no source checkout is needed.
 #
-# Build:  docker build -t deepseek-harness:0.1.0-rc.6 .
-# Run:    docker run -d -p 3080:3080 -v dsh-data:/data deepseek-harness:0.1.0-rc.6
+# Build:  docker build -t deepseek-harness:0.2.2-rc.1 .
+# Run:    docker run -d -p 3080:3080 -v dsh-data:/data deepseek-harness:0.2.2-rc.1
+#
+# Runtime user: root by default. The entrypoint keeps root for dsh and the
+# auth gate; set DSH_RUNTIME_UID to a non-zero uid to drop privileges instead.
 
 # ── stage 1: install the dsh CLI + compile its native addons ────────────────
-FROM node:22-trixie-slim AS dsh-install
-ARG DSH_VERSION=0.1.0-rc.6
+FROM node:24-trixie-slim AS dsh-install
+ARG DSH_VERSION=0.2.2-rc.1
 # node-pty / koffi build native code at install time, so the build stage needs
 # a toolchain; the runtime stage ships only the compiled artifacts.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 make g++ \
  && rm -rf /var/lib/apt/lists/* \
- && npm install -g @deepseek-ai/dsh@${DSH_VERSION} --no-audit --no-fund
+ && npm install -g @deepseek-ai/dsh@${DSH_VERSION} --no-audit --no-fund \
+      --allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs
 
 # ── stage 2: runtime ────────────────────────────────────────────────────────
-FROM node:22-trixie-slim
+FROM node:24-trixie-slim
 ENV NODE_ENV=production \
     DSH_HOME=/data \
     DSH_TELEMETRY_DISABLED=1 \
@@ -40,15 +44,13 @@ RUN apt-get update \
 COPY --from=dsh-install /usr/local/bin /usr/local/bin
 COPY --from=dsh-install /usr/local/lib/node_modules /usr/local/lib/node_modules
 
-# dsh 0.1.0-rc.6 calls crypto.randomUUID() unguarded in the browser image
-# draft-attachment path; browsers without it (Chrome<92/FF<95/Safari<15.4, old
-# WebViews) throw "crypto.randomUUID is not a function". Inject a polyfill
-# into the served index.html so all bundles are covered. The second patch adds
-# an operator opt-out (DSH_TRUST_FENCE=0) for the /api browser-trust fence,
-# used only in legacy mode (DSH_AUTH=0); default keeps the fence intact.
-COPY polyfill-randomuuid.mjs patch-trust-fence.mjs /usr/local/bin/
-RUN node /usr/local/bin/polyfill-randomuuid.mjs \
- && node /usr/local/bin/patch-trust-fence.mjs
+# Optional build-time patch to disable the /api browser-trust fence
+# (DSH_TRUST_FENCE=0). The gate already rewrites Host and strips Origin, so the
+# default fence works without any trusted-host configuration. dsh 0.2.2-rc.1 no
+# longer calls the unguarded crypto.randomUUID() that older releases needed a
+# browser polyfill for, so the polyfill step is dropped.
+COPY patch-trust-fence.mjs /usr/local/bin/
+RUN node /usr/local/bin/patch-trust-fence.mjs
 
 # Built-in password gate (default on via DSH_AUTH=1, see docker-entrypoint.sh):
 # first visit registers a password, afterwards login is required. dsh itself
@@ -59,12 +61,12 @@ RUN chmod 755 /usr/local/bin/auth-proxy.js
 # The agent's working directory; mount a volume here to give it a workspace.
 WORKDIR /workspace
 
-# The official node image ships a `node` user (uid 1000). We do NOT set USER:
-# the entrypoint starts as root, self-heals persistent-volume ownership (K8s /
-# RainYun volumes are root-owned and do not inherit image ownership), then
-# drops privileges to uid 1000 before execing dsh — so the harness itself
-# never runs as root, and Landlock confinement (which works unprivileged)
-# keeps full enforcement.
+# The official node image ships a `node` user (uid 1000). This image runs as
+# root by default: the entrypoint self-heals persistent-volume ownership (K8s /
+# RainYun volumes are root-owned and do not inherit image ownership) and keeps
+# root for every long-lived process. Set DSH_RUNTIME_UID (e.g. 1000) to drop
+# privileges to an unprivileged uid instead. The directories are pre-chowned
+# so a non-root override can write immediately.
 RUN mkdir -p /data /workspace \
  && chown -R node:node /data /workspace
 
@@ -74,10 +76,11 @@ VOLUME /data
 EXPOSE 3080
 
 HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=5 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3080)).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3080),{redirect:'manual'}).then(r=>process.exit(r.status<400?0:1)).catch(()=>process.exit(1))"
 
 COPY docker-entrypoint.sh /usr/local/bin/dsh-entrypoint
 RUN chmod 755 /usr/local/bin/dsh-entrypoint
 
-# No USER on purpose: the entrypoint drops to uid 1000 itself (see above).
+# Default runtime user is root; set DSH_RUNTIME_UID to a non-zero uid to drop.
+USER root
 ENTRYPOINT ["dsh-entrypoint"]

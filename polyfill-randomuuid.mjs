@@ -1,7 +1,9 @@
 // Inject a crypto.randomUUID polyfill into the served frontend index.html.
 //
-// dsh 0.1.0-rc.6 calls crypto.randomUUID() unguarded in the browser image
-// draft-attachment path (dsh-client-ui-conversation). Browsers without the
+// Retained for dsh releases <= 0.1.0-rc.6, which call crypto.randomUUID()
+// unguarded in the browser image draft-attachment path
+// (dsh-client-ui-conversation). The 0.2.2-rc.1 image does not invoke this
+// helper because its bundle no longer references crypto.randomUUID. Browsers without the
 // API (Chrome <92, Firefox <95, Safari <15.4, old WebViews such as WeChat's
 // built-in browser) throw "crypto.randomUUID is not a function". The classic
 // <script> below runs before any bundle and only installs the fallback when

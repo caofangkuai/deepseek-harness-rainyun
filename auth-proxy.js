@@ -35,6 +35,35 @@ const SESSION_TTL_MS = 30 * 24 * 3600 * 1000
 const MIN_PASSWORD = 8
 const MAX_LOGIN_FAILS = 10
 const LOCKOUT_MS = 5 * 60 * 1000
+// DSH_AUTH=0 keeps the gate as the public listener (dsh 0.2.2+ rejects
+// wildcard binds) but forwards every request without a password.
+const AUTH_DISABLED = process.env.DSH_AUTH === '0'
+
+// dsh 0.2.2+ prints a per-process launch token and only mints its browser
+// cookie for a GET / carrying that token. The entrypoint captures the token
+// from the dsh log and hands it to the gate; the gate injects it on the first
+// authenticated page load, then dsh's own dsh-auth-* cookie takes over.
+const LAUNCH_TOKEN = process.env.DSH_LAUNCH_TOKEN || ''
+const DSH_COOKIE_PREFIX = 'dsh-auth-'
+
+function dshCookieNames(cookieHeader) {
+  return (cookieHeader || '')
+    .split(';')
+    .map((part) => part.trim().split('=')[0])
+    .filter((name) => name.startsWith(DSH_COOKIE_PREFIX))
+}
+
+function hasDshCookie(req) {
+  return dshCookieNames(req.headers.cookie).length > 0
+}
+
+function upstreamPath(req) {
+  if (!LAUNCH_TOKEN || req.method !== 'GET' || hasDshCookie(req)) return req.url
+  const url = new URL(req.url, 'http://local')
+  if (url.pathname !== '/') return req.url
+  url.searchParams.set('token', LAUNCH_TOKEN)
+  return url.pathname + url.search
+}
 
 const passwordFile = path.join(AUTH_DIR, 'password.json')
 const secretFile = path.join(AUTH_DIR, 'secret')
@@ -42,11 +71,13 @@ const secretFile = path.join(AUTH_DIR, 'secret')
 fs.mkdirSync(AUTH_DIR, { recursive: true })
 
 let secret
-try {
-  secret = fs.readFileSync(secretFile)
-} catch {
-  secret = crypto.randomBytes(32)
-  fs.writeFileSync(secretFile, secret, { mode: 0o600 })
+if (!AUTH_DISABLED) {
+  try {
+    secret = fs.readFileSync(secretFile)
+  } catch {
+    secret = crypto.randomBytes(32)
+    fs.writeFileSync(secretFile, secret, { mode: 0o600 })
+  }
 }
 
 const hasPassword = () => fs.existsSync(passwordFile)
@@ -66,7 +97,7 @@ function verifyPasswordSync(password, record) {
 // password lives in the deployment spec, not only on the volume, so a volume
 // wipe/recreation cannot reset access back to the registration page. When set,
 // the gate (re)creates the password file from it at startup.
-if (process.env.DSH_AUTH_PASSWORD) {
+if (!AUTH_DISABLED && process.env.DSH_AUTH_PASSWORD) {
   const pw = process.env.DSH_AUTH_PASSWORD
   if (pw.length < MIN_PASSWORD) {
     console.error(`[auth] FATAL: DSH_AUTH_PASSWORD is shorter than ${MIN_PASSWORD} characters`)
@@ -208,9 +239,21 @@ function forward(req, res) {
   const headers = { ...req.headers }
   headers.host = `127.0.0.1:${INTERNAL_PORT}`
   delete headers.origin // dsh fence compares Origin to Host; rewritten Host is loopback
+  const url = new URL(req.url, 'http://local')
   const up = http.request({
-    host: '127.0.0.1', port: INTERNAL_PORT, path: req.url, method: req.method, headers,
+    host: '127.0.0.1', port: INTERNAL_PORT, path: upstreamPath(req), method: req.method, headers,
   }, (ures) => {
+    // A dsh-auth-* cookie from a previous dsh process fails signature checks
+    // after a restart. Clear it and let the browser retry, so the gate can
+    // inject the new launch token instead of looping on 401.
+    if (req.method === 'GET' && url.pathname === '/' && ures.statusCode === 401 && hasDshCookie(req)) {
+      const clears = dshCookieNames(req.headers.cookie)
+        .map((name) => `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`)
+      res.writeHead(302, { location: '/', 'cache-control': 'no-store', 'set-cookie': clears })
+      ures.resume()
+      res.end()
+      return
+    }
     res.writeHead(ures.statusCode, ures.headers)
     ures.pipe(res)
   })
@@ -224,6 +267,11 @@ function forward(req, res) {
 const server = http.createServer(async (req, res) => {
   const pathname = (new URL(req.url, 'http://local')).pathname
   const ip = req.socket.remoteAddress || '?'
+
+  if (AUTH_DISABLED) {
+    forward(req, res)
+    return
+  }
 
   if (!hasPassword()) {
     if (pathname === '/register') {
@@ -295,7 +343,7 @@ const server = http.createServer(async (req, res) => {
 
 // WebSocket/upgrade forwarding (same gate + Host rewrite)
 server.on('upgrade', (req, socket) => {
-  if (!cookieSession(req)) { socket.destroy(); return }
+  if (!AUTH_DISABLED && !cookieSession(req)) { socket.destroy(); return }
   const headers = { ...req.headers, host: `127.0.0.1:${INTERNAL_PORT}` }
   delete headers.origin
   const up = http.request({ host: '127.0.0.1', port: INTERNAL_PORT, path: req.url, headers, method: req.method })
@@ -311,7 +359,11 @@ server.on('upgrade', (req, socket) => {
 
 server.listen(PUBLIC_PORT, '0.0.0.0', () => {
   console.log(`[auth] gate listening on 0.0.0.0:${PUBLIC_PORT} -> 127.0.0.1:${INTERNAL_PORT}`)
-  console.log(hasPassword()
-    ? '[auth] password already set; /login required'
-    : '[auth] no password yet; first visit will ask to register one')
+  if (AUTH_DISABLED) {
+    console.log('[auth] authentication disabled (DSH_AUTH=0); gate is a pass-through proxy')
+  } else {
+    console.log(hasPassword()
+      ? '[auth] password already set; /login required'
+      : '[auth] no password yet; first visit will ask to register one')
+  }
 })
