@@ -71,10 +71,12 @@ GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](h
 
 | Tag | 说明 |
 |---|---|
-| `0.2.2-rc.1` | **当前推荐**：与上游 npm 版本一致（含密码登录 + 全部修复） |
+| `0.2.2-rc.1-fix2` | **当前推荐**：0.2.2-rc.1 + WebSocket 修复 + 远程 OAuth 补丁（`DSH_PUBLIC_ORIGIN`） |
+| `0.2.2-rc.1-fix1` | 0.2.2-rc.1 + WebSocket 修复 |
+| `0.2.2-rc.1` | 上游 npm 版本 tag |
 | `latest` | 跟随最新构建 |
 
-> **版本策略**：镜像 tag 与上游 `@deepseek-ai/dsh` 的 npm 版本号保持一致，不附加后缀；只有上游发新版时才换 tag。同 tag 被重新推送时，雨云等按 tag 缓存的平台可能不会自动拉新——如需强制更新，把镜像字段临时改为 `latest` 或删除应用重建。
+> **版本策略**：镜像 tag 的基线与上游 `@deepseek-ai/dsh` 的 npm 版本号一致，`-fixN` 表示同版本下的本地修复构建。同 tag 被重新推送时，雨云等按 tag 缓存的平台可能不会自动拉新——如需强制更新，把镜像字段临时改为 `latest` 或删除应用重建。
 
 ---
 
