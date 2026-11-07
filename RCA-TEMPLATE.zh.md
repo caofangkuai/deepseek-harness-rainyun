@@ -110,7 +110,7 @@
 | 页面能打开但反复跳登录/401 | 重启后旧 dsh cookie 签名失效 | 网关会自动清旧 cookie 重试；仍失败则重启容器，或清除浏览器站点数据 |
 | 日志报 `host "0.0.0.0" is an unspecified (wildcard) address` | 旧镜像的 legacy 直连模式 | 升级镜像；dsh 0.2.2+ 只允许绑定回环地址，公网统一走网关 |
 | agent 无法执行命令，报 `SANDBOX_UNAVAILABLE` | 雨云运行环境不支持 Landlock/bwrap 沙箱 | 联系雨云确认内核版本与安全上下文支持；Landlock 需内核 5.13+ |
-| 点 DeepSeek 账号登录立即显示“登录失败”，日志 `auth_init` status 200 / stage envelope / code undefined | DeepSeek Platform 拒绝公网 `redirect_uri`（官方仅支持 loopback/SSH）；dsh 侧补丁只能放行请求，无法改变 Platform 策略 | 用 SSH 本地转发或 `local-proxy.mjs`，让浏览器 origin 为 `http://127.0.0.1:<port>`；若 loopback 下仍出现同一条日志，检查服务器出网是否被 WAF 拦截（在容器内 fetch 并打印原始响应） |
+| 点 DeepSeek 账号登录立即显示“登录失败”，日志 `auth_init` status 200 / stage envelope / code undefined | DeepSeek Platform 拒绝公网 `redirect_uri`（官方仅支持 loopback/SSH）；dsh 侧补丁只能放行请求，无法改变 Platform 策略 | 用 SSH 本地转发或 `local-proxy.mjs`，让浏览器 origin 为 `http://127.0.0.1:<port>`；也可临时把 hosts 的 `localhost` 指向服务器 IP，访问 `http://localhost:<PORT>` 完成登录后还原（仅 HTTP 端口）。若 loopback 下仍出现同一条日志，检查服务器出网是否被 WAF 拦截（在容器内 fetch 并打印原始响应） |
 
 ## 13. 密码登录（默认开启，镜像内置鉴权网关）
 
