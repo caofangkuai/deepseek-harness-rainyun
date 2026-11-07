@@ -28,7 +28,7 @@
 docker run -d --name dsh \
   -p 3080:3080 \
   -v dsh-data:/data \
-  ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1
+  ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix4
 ```
 
 打开 http://localhost:3080 ：
@@ -44,7 +44,7 @@ docker run -d --name dsh \
 ```yaml
 services:
   dsh:
-    image: ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1
+    image: ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix4
     container_name: dsh
     restart: unless-stopped
     ports:
@@ -57,11 +57,15 @@ services:
       - DSH_HOME=/data
       - PORT=3080
       - DSH_TELEMETRY_DISABLED=1
+      # 公网访问并需要登录 DeepSeek 账号时改为 1
+      - DSH_MANUAL_OAUTH=0
       # 可选：模型密钥（也可在 Web UI 配置）
       # - DEEPSEEK_API_KEY=sk-...
 volumes:
   dsh-data:
 ```
+
+> 通过公网地址访问时，账号登录需要 `DSH_MANUAL_OAUTH=1`：授权后浏览器会跳到 `127.0.0.1` 报错，复制地址栏 URL 粘贴到 `http://<公网地址>:<PORT>/oauth/manual` 完成登录。`localhost` / SSH 转发 / `local-proxy.mjs` 访问时保持 `0` 即可。
 
 ---
 
@@ -71,7 +75,8 @@ GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](h
 
 | Tag | 说明 |
 |---|---|
-| `0.2.2-rc.1-fix3` | **当前推荐**：0.2.2-rc.1 + WebSocket 修复 + 远程 OAuth 补丁（dsh 侧放行任意 HTTP(S) origin；Platform 仍拒绝公网回调，公开账号登录不可用） |
+| `0.2.2-rc.1-fix4` | **当前推荐**：0.2.2-rc.1 + WebSocket 修复 + 手动回调桥接。设 `DSH_MANUAL_OAUTH=1` 后账号登录强制使用 loopback `redirect_uri`，浏览器跳转失败后把地址栏 URL 粘贴到 `/oauth/manual` 即可完成登录 |
+| `0.2.2-rc.1-fix3` | 0.2.2-rc.1 + WebSocket 修复 + 远程 OAuth 补丁（dsh 侧放行任意 HTTP(S) origin；Platform 仍拒绝公网回调，公开账号登录不可用） |
 | `0.2.2-rc.1-fix2` | 0.2.2-rc.1 + WebSocket 修复 + 远程 OAuth 补丁（仅 `DSH_PUBLIC_ORIGIN` 白名单） |
 | `0.2.2-rc.1-fix1` | 0.2.2-rc.1 + WebSocket 修复 |
 | `0.2.2-rc.1` | 上游 npm 版本 tag |
@@ -91,13 +96,17 @@ GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](h
 | `DSH_AUTH_PASSWORD` | 空 | **推荐**：预置登录密码。密码保存在部署配置里而非仅卷中——即使卷数据被重置（雨云重建容器），重启后也会自动恢复该密码，不会回到"设置密码"页。不填则首次访问注册 |
 | `DSH_TELEMETRY_DISABLED` | `1` | 关闭遥测 |
 | `DEEPSEEK_API_KEY` | 空 | 可选，模型密钥（也可在 Web UI 配置） |
+| `DSH_MANUAL_OAUTH` | `0` | 设为 `1` 时账号登录强制使用 `http://127.0.0.1:3081/oauth/callback` 作为回调（Platform 只接受 loopback）。授权后浏览器会跳到 `127.0.0.1` 并报错，复制地址栏 URL 粘贴到 `/oauth/manual` 完成登录 |
+| `DSH_INTERNAL_PORT` | `3081` | dsh 内部回环端口；修改后手动回调 URL 中的端口也要对应替换 |
 | `DSH_RUNTIME_UID` / `DSH_RUNTIME_GID` | `0` | 运行用户，默认 root；设为非零（如 `1000`）则降权运行，入口会自动修复卷属主 |
 
 > dsh 0.2.2+ 拒绝绑定 `0.0.0.0`，因此无论是否开启密码，dsh 都只监听容器回环地址，公网始终由网关进入。网关会自动改写 Host 并剥离 Origin，`DSH_TRUSTED_HOSTS` / `DSH_TRUST_FENCE` 不再需要（旧配置保留也无副作用）。
 >
-> 账号登录：镜像内置补丁移除了 dsh 的 loopback-only 回调校验，接受任意 HTTP(S) origin。实测 DeepSeek Platform 仍拒绝公网 `redirect_uri`：容器日志会出现 `[deepseek-account] response rejected`，`path: /auth-api/v0/dsh/auth_init`、`status: 200`、`stage: envelope`、`issues: invalid_value + invalid_type`。公开登录不可用。请使用 SSH 本地转发（`ssh -N -L 13080:127.0.0.1:3080 root@服务器`，浏览器打开 `http://127.0.0.1:13080`）或在本机运行 `node local-proxy.mjs https://<公网地址> 13080` 后打开 `http://127.0.0.1:13080`；浏览器 origin 为 loopback 时 Platform 才会接受。补丁会让任意 origin 收到授权码，PKCE 仍保护换取环节，仅建议在自有部署使用。
+> 账号登录（fix4）：DeepSeek Platform 只在 schema 层接受 loopback `redirect_uri`，公网回调会被拒绝（`auth_init` 返回 `50005 PAYLOAD_SCHEMA_MISMATCH`）。设置 `DSH_MANUAL_OAUTH=1` 后，非 loopback 的登录请求会被固定为 `http://127.0.0.1:3081/oauth/callback`；Platform 接受后，浏览器授权完会跳到本机 `127.0.0.1` 并提示无法访问。复制地址栏里的完整 URL（含 `code` 和 `state`），打开 `http://<公网地址>:<PORT>/oauth/manual`，粘贴并提交，网关会在服务端完成回调，账号随即登录。token 持久化在 `/data`。
 >
-> 不想在本机跑代理时，可临时把 hosts 的 `localhost` 指向服务器（仅 HTTP 端口可用）：注释掉 `127.0.0.1 localhost` 和 `::1 localhost`，加入 `38.246.252.230 localhost`，浏览器打开 `http://localhost:<PORT>` 完成网关和账号登录，然后还原 hosts。账号 token 存在 `/data`，还原后从公网地址访问仍然有效；hosts 改动期间会影响本机其他使用 `localhost` 的服务。
+> 仍可使用 SSH 本地转发（`ssh -N -L 13080:127.0.0.1:3080 root@服务器`，浏览器打开 `http://127.0.0.1:13080`）或在本机运行 `node local-proxy.mjs https://<公网地址> 13080` 后打开 `http://127.0.0.1:13080`；浏览器 origin 为 loopback 时走官方登录路径，不需要 `DSH_MANUAL_OAUTH`。
+>
+> hosts 方案也可用：临时把 `localhost` 指向服务器（仅 HTTP 端口可用），浏览器打开 `http://localhost:<PORT>` 完成网关和账号登录，然后还原 hosts。账号 token 存在 `/data`，还原后从公网地址访问仍然有效；hosts 改动期间会影响本机其他使用 `localhost` 的服务。
 
 ---
 
@@ -109,9 +118,9 @@ GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](h
 
 | 项 | 值 |
 |---|---|
-| 镜像 | `ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1` |
+| 镜像 | `ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix4` |
 | 最小资源 | 1 核 / 512MB（推荐 1核1GB+） |
-| Env | `DSH_HOME=/data`、`PORT=3080`、`DSH_TELEMETRY_DISABLED=1` |
+| Env | `DSH_HOME=/data`、`PORT=3080`、`DSH_TELEMETRY_DISABLED=1`、`DSH_AUTH_PASSWORD=<密码>`、`DSH_MANUAL_OAUTH=1`（公网账号登录） |
 | 持久卷 | 挂载路径 `/data`（与 DSH_HOME 一致），子路径 `dsh`，目录类型 |
 | 服务 | 外部访问，内部端口 `3080`，协议 tcp |
 
@@ -131,10 +140,10 @@ GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](h
 
 ```sh
 # 构建（默认 npm 包 0.2.2-rc.1；换版本：--build-arg DSH_VERSION=<version>）
-docker build -t deepseek-harness:0.2.2-rc.1 .
+docker build -t deepseek-harness:0.2.2-rc.1-fix4 .
 
 # 冒烟测试（网关/登录/沙箱/持久化/legacy/健康，全过才退出 0）
-./smoke-test.sh deepseek-harness:0.2.2-rc.1
+./smoke-test.sh deepseek-harness:0.2.2-rc.1-fix4
 
 # 推送新 tag 到 GitHub Container Registry
 GHCR_USERNAME=<用户> GHCR_TOKEN=<令牌> DSH_VERSION=0.2.2-rc.1 ./push.sh
@@ -162,10 +171,10 @@ GHCR_USERNAME=<用户> GHCR_TOKEN=<令牌> DSH_VERSION=0.2.2-rc.1 ./push.sh
 ```
 ├── Dockerfile                  # 多阶段构建（node:24-trixie-slim + npm 官方包）
 ├── docker-entrypoint.sh        # 入口：卷属主自愈 → profile 补丁 → 回环启动 dsh + 网关
-├── auth-proxy.js               # 内置密码登录网关（零依赖，首次注册+登录+会话；DSH_AUTH=0 时透传）
+├── auth-proxy.js               # 内置密码登录网关（零依赖；含 /oauth/manual 手动回调桥接）
 ├── polyfill-randomuuid.mjs     # 旧版（<=0.1.0-rc.6）兼容垫片，当前构建不注入
 ├── patch-trust-fence.mjs       # 构建期补丁：可选关闭 /api 信任围栏（DSH_TRUST_FENCE=0 构建参数）
-├── patch-remote-oauth.mjs      # 构建期补丁：移除 OAuth 回调的 loopback 限制
+├── patch-remote-oauth.mjs      # 构建期补丁：OAuth 回调（默认任意 HTTP(S)，DSH_MANUAL_OAUTH=1 强制 loopback）
 ├── local-proxy.mjs             # 可选：在浏览器本机把 loopback 转发到远端网关
 ├── smoke-test.sh               # 一键冒烟测试
 ├── push.sh                     # 一键发布脚本

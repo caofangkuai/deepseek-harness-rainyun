@@ -20,7 +20,7 @@ set -euo pipefail
 
 # Build marker: bump on every image publish so deployments can verify from the
 # logs which build is actually running (RainYun caches images by tag).
-DSH_DOCKER_BUILD="${DSH_DOCKER_BUILD:-2026-11-07-0.2.2-rc.1-1}"
+DSH_DOCKER_BUILD="${DSH_DOCKER_BUILD:-2026-11-07-0.2.2-rc.1-2}"
 
 # Root is the default runtime user. Set DSH_RUNTIME_UID/DSH_RUNTIME_GID to a
 # non-zero id (e.g. 1000) to run dsh and the auth gate unprivileged instead.
@@ -38,6 +38,10 @@ fi
 
 AUTH_MODE="${DSH_AUTH:-1}"
 DSH_INTERNAL_PORT="${DSH_INTERNAL_PORT:-3081}"
+# The dsh process reads this in the manual-OAuth build patch; export it before
+# `dsh web` starts (the gate also reads it). DSH_MANUAL_OAUTH comes from the
+# container environment and is inherited by both processes.
+export DSH_INTERNAL_PORT
 
 PROFILE_DIR="$DSH_HOME/profiles/web"
 PROFILE_PATCH="$PROFILE_DIR/cordis.patch.yml"

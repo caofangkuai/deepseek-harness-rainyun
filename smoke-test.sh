@@ -14,7 +14,7 @@
 #   - healthcheck healthy
 set -euo pipefail
 
-IMAGE="${1:-deepseek-harness:0.2.2-rc.1}"
+IMAGE="${1:-deepseek-harness:0.2.2-rc.1-fix4}"
 NAME="dsh-smoke"
 VOL="dsh-smoke-data"
 PORT="${SMOKE_PORT:-3081}"
@@ -39,6 +39,7 @@ docker run -d --name "$NAME" \
   -e DSH_HOME=/data \
   -e PORT=3080 \
   -e DSH_AUTH_PASSWORD="$PASSWORD" \
+  -e DSH_MANUAL_OAUTH=1 \
   "$IMAGE" >/dev/null
 
 for i in $(seq 1 40); do
@@ -98,6 +99,16 @@ if echo "$WS" | grep -q '101 Switching Protocols' && echo "$WS" | grep -qi 'Sec-
 else
   fail "websocket handshake failed: $(echo "$WS" | head -1)"
 fi
+
+say "manual oauth bridge"
+code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Accept: text/html' "http://127.0.0.1:$PORT/oauth/manual")
+[ "$code" = "302" ] && ok "unauthenticated /oauth/manual -> 302 (login page)" || fail "expected 302, got $code"
+code=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" "http://127.0.0.1:$PORT/oauth/manual")
+[ "$code" = "200" ] && ok "authenticated /oauth/manual renders the paste form" || fail "expected 200, got $code"
+code=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" \
+  -d 'callback=http%3A%2F%2F127.0.0.1%3A3081%2Foauth%2Fcallback%3Fcode%3Dx%26state%3Dy' \
+  "http://127.0.0.1:$PORT/oauth/manual")
+[ "$code" = "400" ] && ok "callback relay reaches dsh (no active attempt -> 400)" || fail "expected 400, got $code"
 
 say "sandbox: launcher availability (host may block Landlock/bwrap)"
 probe=$(docker exec "$NAME" sh -c 'cd /usr/local/lib/node_modules/@deepseek-ai/dsh && node -e "

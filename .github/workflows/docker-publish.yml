@@ -71,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run -d --name smoke -p 3081:3080 -e DSH_HOME=/data -e PORT=3080 \
-            -e DSH_AUTH_PASSWORD=SmokePass123 \
+            -e DSH_AUTH_PASSWORD=SmokePass123 -e DSH_MANUAL_OAUTH=1 \
             ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }}
           for i in $(seq 1 40); do
             docker logs smoke 2>&1 | grep -q 'auth] gate listening' && break
@@ -84,6 +84,12 @@ jobs:
           JAR=$(mktemp)
           curl -s -c "$JAR" -o /dev/null -X POST -d 'password=SmokePass123' http://127.0.0.1:3081/login
           curl -s -L -b "$JAR" -c "$JAR" http://127.0.0.1:3081/ | grep -q '__DSH_BOOT__'
+          # manual OAuth bridge is behind the gate; an authenticated GET renders it
+          curl -s -o /dev/null -w '%{http_code}' -H 'Accept: text/html' http://127.0.0.1:3081/oauth/manual | grep -q '302'
+          curl -s -o /dev/null -w '%{http_code}' -b "$JAR" http://127.0.0.1:3081/oauth/manual | grep -q '200'
+          curl -s -b "$JAR" -o /dev/null -w '%{http_code}' \
+            -d 'callback=http%3A%2F%2F127.0.0.1%3A3081%2Foauth%2Fcallback%3Fcode%3Dx%26state%3Dy' \
+            http://127.0.0.1:3081/oauth/manual | grep -q '400'
           # websocket upgrade must forward the upstream 101 handshake headers
           WS=$(curl -sS -i -N --http1.1 --max-time 3 \
             -H 'Connection: Upgrade' -H 'Upgrade: websocket' \

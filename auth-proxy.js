@@ -14,6 +14,9 @@
  *     session cookie (30 days, HttpOnly, SameSite=Lax).
  *   - Everything else requires a valid cookie: browser navigations are
  *     redirected to /login, API/asset requests get 401.
+ *   - With DSH_MANUAL_OAUTH=1 the account login uses a loopback redirect_uri
+ *     that the browser cannot reach; /oauth/manual (behind the same password
+ *     gate) accepts the failed callback URL and relays it to dsh server-side.
  *   - Authenticated traffic is proxied to dsh with the Host header rewritten
  *     to loopback and the Origin header stripped, so dsh's own browser-trust
  *     fence passes without any DSH_TRUSTED_HOSTS configuration.
@@ -38,6 +41,11 @@ const LOCKOUT_MS = 5 * 60 * 1000
 // DSH_AUTH=0 keeps the gate as the public listener (dsh 0.2.2+ rejects
 // wildcard binds) but forwards every request without a password.
 const AUTH_DISABLED = process.env.DSH_AUTH === '0'
+// The DeepSeek Platform only accepts a loopback redirect_uri. With
+// DSH_MANUAL_OAUTH=1 the build patch forces non-loopback callers to
+// http://127.0.0.1:DSH_INTERNAL_PORT; the browser cannot reach that URL, so
+// the gate exposes /oauth/manual to relay the pasted callback server-side.
+const MANUAL_OAUTH = process.env.DSH_MANUAL_OAUTH === '1'
 
 // dsh 0.2.2+ prints a per-process launch token and only mints its browser
 // cookie for a GET / carrying that token. The entrypoint captures the token
@@ -234,6 +242,66 @@ function readBody(req) {
   })
 }
 
+// ---- manual OAuth callback bridge (DSH_MANUAL_OAUTH=1) ----
+// The Platform redirects to http://127.0.0.1:DSH_INTERNAL_PORT/oauth/callback,
+// which only exists inside the container. The user copies that failed URL from
+// the login popup's address bar; the gate validates it and performs the
+// callback against dsh's loopback listener on the user's behalf.
+const manualPage = (err = '') => base('完成账号登录', `
+<h2>完成账号登录</h2>
+<p class="note">在账号登录弹窗中完成授权后，浏览器会跳转到 <code>127.0.0.1</code> 并提示无法访问。复制地址栏中的完整 URL（包含 code 和 state），粘贴到下面完成登录。</p>
+${err ? `<p class="err">${err}</p>` : ''}
+<form method="post" action="/oauth/manual">
+  <input type="url" name="callback" placeholder="http://127.0.0.1:3081/oauth/callback?code=...&amp;state=..." required autofocus>
+  <button type="submit">完成登录</button>
+</form>
+<p class="note" style="margin-top:16px;margin-bottom:0"><a href="/" style="color:#8ab4ff">返回应用</a></p>`)
+
+const manualDonePage = () => base('登录完成', `
+<h2>登录完成</h2>
+<p class="note">DeepSeek 账号已登录。关闭账号登录弹窗，返回应用即可。</p>
+<p style="margin:20px 0 0"><a href="/" style="color:#8ab4ff">返回应用</a></p>`)
+
+function parseManualCallback(value) {
+  let url
+  try { url = new URL(value) } catch { return { error: '无法解析这个 URL' } }
+  if (url.protocol !== 'http:') return { error: '只接受 http:// 本机回调地址' }
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) {
+    return { error: '回调地址必须是本机 loopback（127.0.0.1 / localhost / [::1]）' }
+  }
+  if (!url.port) return { error: '回调地址缺少端口' }
+  if (url.pathname !== '/oauth/callback') return { error: '回调地址路径必须是 /oauth/callback' }
+  const codes = url.searchParams.getAll('code')
+  const states = url.searchParams.getAll('state')
+  if (codes.length !== 1 || states.length !== 1) return { error: '回调地址必须恰好包含一个 code 和一个 state' }
+  const code = codes[0]
+  const state = states[0]
+  if (!code || !state) return { error: '回调地址缺少 code 或 state' }
+  if (code.length > 4096 || state.length > 512) return { error: '回调参数过长' }
+  return { code, state }
+}
+
+function relayManualCallback(code, state) {
+  return new Promise((resolve) => {
+    const path = `/oauth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`
+    const headers = {
+      host: `127.0.0.1:${INTERNAL_PORT}`,
+      accept: 'text/html',
+      'cache-control': 'no-cache',
+    }
+    const req = http.request({ host: '127.0.0.1', port: INTERNAL_PORT, path, method: 'GET', headers }, (ures) => {
+      ures.resume()
+      ures.on('end', () => resolve({ status: ures.statusCode || 0, location: ures.headers.location || '' }))
+    })
+    req.on('error', () => resolve({ status: 0, location: '' }))
+    req.setTimeout(60000, () => {
+      req.destroy()
+      resolve({ status: 0, location: '' })
+    })
+    req.end()
+  })
+}
+
 // ---- forward authenticated traffic to dsh (loopback, Host rewritten) ----
 function forward(req, res) {
   const headers = { ...req.headers }
@@ -336,6 +404,32 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ error: 'unauthorized' }))
     }
     return
+  }
+
+  if (pathname === '/oauth/manual') {
+    if (!MANUAL_OAUTH) {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
+      res.end('manual OAuth bridge is disabled; set DSH_MANUAL_OAUTH=1 and restart')
+      return
+    }
+    if (req.method !== 'POST') return sendHtml(res, 200, manualPage())
+    let params
+    try { params = new URLSearchParams(await readBody(req)) } catch { return sendHtml(res, 400, manualPage('请求无效')) }
+    const parsed = parseManualCallback(params.get('callback') || '')
+    if (parsed.error) return sendHtml(res, 400, manualPage(parsed.error))
+    const result = await relayManualCallback(parsed.code, parsed.state)
+    console.log(`[auth] manual oauth relay status=${result.status}`)
+    if (result.status === 302 && result.location.includes('/dsh/authorized')) {
+      return sendHtml(res, 200, manualDonePage())
+    }
+    if (result.status === 400) return sendHtml(res, 400, manualPage('回调 URL 无效或已过期，请返回应用重新发起登录'))
+    if (result.status === 410) return sendHtml(res, 410, manualPage('该登录请求已完成或已过期，请返回应用重新发起登录'))
+    if (result.status === 404) return sendHtml(res, 400, manualPage('没有进行中的登录请求。请先在应用中点击账号登录，再粘贴回调 URL'))
+    if (result.status === 401 || result.status === 302) {
+      return sendHtml(res, 502, manualPage('回调未完成：内部服务要求重新认证或返回了重定向。请刷新应用页面后重试'))
+    }
+    if (result.status === 0) return sendHtml(res, 502, manualPage('无法连接内部 dsh 服务，请检查容器日志'))
+    return sendHtml(res, 502, manualPage('登录失败，请返回应用重新发起登录（code 可能已过期或已被使用）'))
   }
 
   forward(req, res)

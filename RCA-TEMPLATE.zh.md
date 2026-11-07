@@ -22,8 +22,8 @@
 
 | 字段 | 值 | 说明 |
 |---|---|---|
-| 版本号 | `0.2.2-rc.1-fix3` | 与镜像 tag 保持一致 |
-| 镜像 | `ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix3` | 已推送到 ghcr.io（公开），也可用 `:latest`。注意：当前为 **linux/amd64** 单架构镜像，雨云 x86_64 节点可直接拉取；若雨云给 arm64 节点，需先构建多架构镜像 |
+| 版本号 | `0.2.2-rc.1-fix4` | 与镜像 tag 保持一致 |
+| 镜像 | `ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix4` | 已推送到 ghcr.io（公开），也可用 `:latest`。注意：当前为 **linux/amd64** 单架构镜像，雨云 x86_64 节点可直接拉取；若雨云给 arm64 节点，需先构建多架构镜像 |
 | 最小CPU | `1` 核 | Node 服务，1 核可跑 |
 | 最小内存 | `512` MB | 推荐给用户写 1GB，agent 跑任务更从容 |
 
@@ -70,6 +70,7 @@
 |---|---|---|---|---|---|
 | 模型 API Key | `DEEPSEEK_API_KEY` | 文本/密码 | 空 | 否 | 部署后也可在 Web UI「设置→模型」里填；填了则开箱即用（DeepSeek 提供方默认读取此变量） |
 | 登录密码（推荐） | `DSH_AUTH_PASSWORD` | 文本/密码 | 空 | 否 | **推荐填写**：密码存在模板配置里（不依赖卷）。即使雨云重建容器导致卷数据被重置，重启后也会自动用此值恢复密码，**不会**再回到"设置密码"页。不填则用首次访问注册的方式（卷重置后需重新设置） |
+| 手动账号登录 | `DSH_MANUAL_OAUTH` | 数字 | `0` | 否 | 公网部署推荐填 `1`。DeepSeek Platform 只接受 loopback 回调，开启后登录会强制使用 `http://127.0.0.1:3081/oauth/callback`；授权后把浏览器地址栏 URL 粘贴到 `/oauth/manual` 完成登录 |
 | 服务端口 | `PORT` | 数字 | `3080` | 否 | 一般无需修改。改端口后重启会自动更新 profile 补丁（`/data/profiles/web/cordis.patch.yml`）的托管行 |
 
 > 说明：dsh 0.2.2+ 拒绝绑定 `0.0.0.0`，镜像会让 dsh 只监听容器回环地址，公网统一经内置网关进入。网关会自动改写 Host 并剥离 Origin，因此**无需填写公网访问地址**，`DSH_TRUSTED_HOSTS` / `DSH_TRUST_FENCE` 也不再需要。
@@ -110,7 +111,7 @@
 | 页面能打开但反复跳登录/401 | 重启后旧 dsh cookie 签名失效 | 网关会自动清旧 cookie 重试；仍失败则重启容器，或清除浏览器站点数据 |
 | 日志报 `host "0.0.0.0" is an unspecified (wildcard) address` | 旧镜像的 legacy 直连模式 | 升级镜像；dsh 0.2.2+ 只允许绑定回环地址，公网统一走网关 |
 | agent 无法执行命令，报 `SANDBOX_UNAVAILABLE` | 雨云运行环境不支持 Landlock/bwrap 沙箱 | 联系雨云确认内核版本与安全上下文支持；Landlock 需内核 5.13+ |
-| 点 DeepSeek 账号登录立即显示“登录失败”，日志 `auth_init` status 200 / stage envelope / code undefined | DeepSeek Platform 拒绝公网 `redirect_uri`（官方仅支持 loopback/SSH）；dsh 侧补丁只能放行请求，无法改变 Platform 策略 | 用 SSH 本地转发或 `local-proxy.mjs`，让浏览器 origin 为 `http://127.0.0.1:<port>`；也可临时把 hosts 的 `localhost` 指向服务器 IP，访问 `http://localhost:<PORT>` 完成登录后还原（仅 HTTP 端口）。若 loopback 下仍出现同一条日志，检查服务器出网是否被 WAF 拦截（在容器内 fetch 并打印原始响应） |
+| 点 DeepSeek 账号登录立即显示“登录失败”，日志 `auth_init` status 200 / stage envelope / code undefined | DeepSeek Platform 拒绝公网 `redirect_uri`（官方仅支持 loopback/SSH） | 设置 `DSH_MANUAL_OAUTH=1` 后按下方“手动完成账号登录”操作；也可用 SSH 本地转发或 `local-proxy.mjs`，让浏览器 origin 为 `http://127.0.0.1:<port>`；hosts 方案仍可用。若 loopback 下仍出现同一条日志，检查服务器出网是否被 WAF 拦截（在容器内 fetch 并打印原始响应） |
 
 ## 13. 密码登录（默认开启，镜像内置鉴权网关）
 
@@ -126,3 +127,21 @@
 - **安全边界**：无论是否启用密码，dsh 都只监听容器回环地址（127.0.0.1），公网始终经内置网关进入；网关改写 Host 并剥离 Origin，无需设置 `DSH_TRUSTED_HOSTS` / `DSH_TRUST_FENCE`。
 - **防爆破**：登录失败 10 次后锁定该 IP 5 分钟。
 - ⚠️ 网关走明文 HTTP（雨云一般只提供 HTTP），密码经网络传输；若雨云支持 HTTPS/域名证书可更安全。
+
+## 14. 手动完成账号登录（DSH_MANUAL_OAUTH=1）
+
+公网部署时 DeepSeek Platform 会拒绝公网 `redirect_uri`（`auth_init` 返回 `50005 PAYLOAD_SCHEMA_MISMATCH`）。fix4 让登录始终使用 loopback 回调，由网关在服务端完成回调：
+
+1. 在雨云环境变量中设置 `DSH_MANUAL_OAUTH=1`，重启应用。
+2. 打开应用，点「DeepSeek 账号」→「登录」，浏览器会打开 Platform 授权页。
+3. 完成授权后，浏览器跳转到 `http://127.0.0.1:3081/oauth/callback?...` 并提示无法访问，这是预期结果。
+4. 复制地址栏中的完整 URL（包含 `code` 和 `state`）。
+5. 打开 `http://<公网地址>:<PORT>/oauth/manual`，粘贴 URL，点「完成登录」。
+6. 页面显示「登录完成」后，关闭登录弹窗，返回应用；账号已登录，token 存在 `/data`。
+
+说明：
+
+- 回调 URL 中的端口默认是 `3081`（`DSH_INTERNAL_PORT`）；改过内部端口时以实际 URL 为准。网关只校验 loopback、端口、路径以及唯一的 `code` / `state`。
+- `/oauth/manual` 与主应用共用密码会话，未登录会先跳转 `/login`。
+- `DSH_MANUAL_OAUTH=0` 时登录仍按公网 origin 发起，Platform 会拒绝；公网部署请填 `1`。
+- SSH 转发 / `local-proxy.mjs` 的 loopback origin 不受影响，无需开启此变量。

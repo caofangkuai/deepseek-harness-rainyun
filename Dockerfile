@@ -53,9 +53,10 @@ COPY patch-trust-fence.mjs /usr/local/bin/
 RUN node /usr/local/bin/patch-trust-fence.mjs
 
 # Remote account login: dsh only accepts a loopback OAuth callback origin by
-# default. The patch removes that check and accepts any HTTP(S) origin. The
-# DeepSeek Platform must also accept the resulting redirect_uri; loopback /
-# SSH forwarding remains the documented fallback.
+# default. The patch accepts any HTTP(S) origin, and with DSH_MANUAL_OAUTH=1 it
+# forces non-loopback callers to a loopback redirect_uri that the auth gate
+# completes server-side (the Platform rejects public redirect_uri values at the
+# schema layer). Loopback / SSH forwarding keeps working without the flag.
 COPY patch-remote-oauth.mjs /usr/local/bin/
 RUN node /usr/local/bin/patch-remote-oauth.mjs
 
