@@ -88,6 +88,17 @@ else
   fail "authenticated /api -> $code"
 fi
 
+say "websocket upgrade"
+WS=$(curl -sS -i -N --http1.1 --max-time 3 \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  -b "$JAR" "http://127.0.0.1:$PORT/api/remote.mux" 2>&1 || true)
+if echo "$WS" | grep -q '101 Switching Protocols' && echo "$WS" | grep -qi 'Sec-WebSocket-Accept:'; then
+  ok "websocket handshake forwards Sec-WebSocket-Accept"
+else
+  fail "websocket handshake failed: $(echo "$WS" | head -1)"
+fi
+
 say "sandbox: launcher availability (host may block Landlock/bwrap)"
 probe=$(docker exec "$NAME" sh -c 'cd /usr/local/lib/node_modules/@deepseek-ai/dsh && node -e "
 const m=require(\"@deepseek-ai/node-addon-system/landlock-run\");

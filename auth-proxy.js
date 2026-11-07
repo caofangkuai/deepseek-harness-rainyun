@@ -347,11 +347,26 @@ server.on('upgrade', (req, socket) => {
   const headers = { ...req.headers, host: `127.0.0.1:${INTERNAL_PORT}` }
   delete headers.origin
   const up = http.request({ host: '127.0.0.1', port: INTERNAL_PORT, path: req.url, headers, method: req.method })
+  const relayResponse = (ures) => {
+    const lines = [`HTTP/1.1 ${ures.statusCode} ${ures.statusMessage || ''}`]
+    for (let i = 0; i < ures.rawHeaders.length; i += 2) {
+      lines.push(`${ures.rawHeaders[i]}: ${ures.rawHeaders[i + 1]}`)
+    }
+    socket.write(lines.join('\r\n') + '\r\n\r\n')
+    return lines
+  }
   up.on('upgrade', (ures, usock, head) => {
-    socket.write('HTTP/1.1 101 Switching Protocols\r\n\r\n')
+    relayResponse(ures)
     if (head && head.length) usock.unshift(head)
     usock.pipe(socket)
     socket.pipe(usock)
+    usock.on('error', () => socket.destroy())
+    socket.on('error', () => usock.destroy())
+  })
+  up.on('response', (ures) => {
+    relayResponse(ures)
+    ures.pipe(socket)
+    ures.on('error', () => socket.destroy())
   })
   up.on('error', () => socket.destroy())
   up.end()

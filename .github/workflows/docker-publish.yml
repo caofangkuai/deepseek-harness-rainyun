@@ -74,6 +74,13 @@ jobs:
           JAR=$(mktemp)
           curl -s -c "$JAR" -o /dev/null -X POST -d 'password=SmokePass123' http://127.0.0.1:3081/login
           curl -s -L -b "$JAR" -c "$JAR" http://127.0.0.1:3081/ | grep -q '__DSH_BOOT__'
+          # websocket upgrade must forward the upstream 101 handshake headers
+          WS=$(curl -sS -i -N --http1.1 --max-time 3 \
+            -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+            -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+            -b "$JAR" http://127.0.0.1:3081/api/remote.mux 2>&1 || true)
+          echo "$WS" | grep -q '101 Switching Protocols'
+          echo "$WS" | grep -qi 'Sec-WebSocket-Accept:'
           docker rm -f smoke >/dev/null
 
       - name: Push to ghcr.io
