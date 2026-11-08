@@ -16,7 +16,7 @@
 | 🔐 **内置密码登录** | 首次访问注册密码，之后需登录（默认开启，`DSH_AUTH=0` 可关闭） |
 | 💾 **持久卷自愈** | 自动修复 root 属主卷（K8s/雨云不继承镜像属主的问题），幂等、重启不重复 chown |
 | 🌐 **免配置公网访问** | 鉴权模式下 dsh 只监听回环地址，网关自动处理 Host/Origin，无需填公网地址 |
-| 🧩 **旧浏览器兼容** | 注入 `crypto.randomUUID` polyfill（微信内置浏览器等旧 WebView 也能用） |
+| 🧩 **旧浏览器兼容** | 构建期把前端转译到 Chrome 90 语法，并注入 `Object.hasOwn` / `.at` / `URL.canParse` / `Promise.withResolvers` / `AbortSignal.any` / `crypto.randomUUID` 等 polyfill（Chrome 91 WebView、微信内置浏览器等也能正常启动） |
 | 🔒 **默认 root 运行** | dsh 与鉴权网关默认以 root 启动；如需降权设置 `DSH_RUNTIME_UID=1000`，bash 工具仍走 Landlock 沙箱 |
 | 🚀 **多阶段构建** | 基于 npm 官方包 `@deepseek-ai/dsh`，原生依赖构建期编译，运行镜像精简 |
 
@@ -28,7 +28,7 @@
 docker run -d --name dsh \
   -p 3080:3080 \
   -v dsh-data:/data \
-  ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix4
+  ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix5
 ```
 
 打开 http://localhost:3080 ：
@@ -44,7 +44,7 @@ docker run -d --name dsh \
 ```yaml
 services:
   dsh:
-    image: ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix4
+    image: ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix5
     container_name: dsh
     restart: unless-stopped
     ports:
@@ -69,13 +69,27 @@ volumes:
 
 ---
 
+## 旧浏览器兼容
+
+dsh 0.2.2-rc.1 的前端默认按现代浏览器构建，包含 `static {}` 类静态块（Chrome 94+）、`Object.hasOwn`（Chrome 93+）、`Array.prototype.at`（Chrome 92+）、`URL.canParse`（Chrome 120+）等语法/API。Chrome 91 等旧 WebView 会在解析阶段直接失败，表现为密码登录成功后整页白屏。
+
+镜像构建阶段会做两件事：
+
+- 用 esbuild 把 `dist/assets` 下全部 JS 转译到 Chrome 90 语法，去掉 `static {}` 等旧引擎无法解析的语法；
+- 在 `index.html` 的模块脚本之前注入经典 `<script>` polyfill，覆盖 `Object.hasOwn`、`Array.prototype.at` / `String.prototype.at`、`URL.canParse` / `URL.parse`、`Promise.withResolvers` / `Promise.try`、`AbortSignal.any` / `AbortSignal.timeout`、`findLast`、`toSorted`、`Object.groupBy`、`crypto.randomUUID` 等缺失 API。
+
+polyfill 只在原生 API 不存在时安装，现代浏览器行为不变。
+
+---
+
 ## 📦 镜像
 
 GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](https://github.com/caofangkuai/deepseek-harness/pkgs/container/deepseek-harness)
 
 | Tag | 说明 |
 |---|---|
-| `0.2.2-rc.1-fix4` | **当前推荐**：0.2.2-rc.1 + WebSocket 修复 + 手动回调桥接。设 `DSH_MANUAL_OAUTH=1` 后账号登录强制使用 loopback `redirect_uri`，浏览器跳转失败后把地址栏 URL 粘贴到 `/oauth/manual` 即可完成登录 |
+| `0.2.2-rc.1-fix5` | **当前推荐**：fix4 + 旧浏览器兼容。构建期把前端转译到 Chrome 90 语法并注入运行时 polyfill，Chrome 91 WebView / 微信内置浏览器登录后不再白屏 |
+| `0.2.2-rc.1-fix4` | 0.2.2-rc.1 + WebSocket 修复 + 手动回调桥接。设 `DSH_MANUAL_OAUTH=1` 后账号登录强制使用 loopback `redirect_uri`，浏览器跳转失败后把地址栏 URL 粘贴到 `/oauth/manual` 即可完成登录 |
 | `0.2.2-rc.1-fix3` | 0.2.2-rc.1 + WebSocket 修复 + 远程 OAuth 补丁（dsh 侧放行任意 HTTP(S) origin；Platform 仍拒绝公网回调，公开账号登录不可用） |
 | `0.2.2-rc.1-fix2` | 0.2.2-rc.1 + WebSocket 修复 + 远程 OAuth 补丁（仅 `DSH_PUBLIC_ORIGIN` 白名单） |
 | `0.2.2-rc.1-fix1` | 0.2.2-rc.1 + WebSocket 修复 |
@@ -118,7 +132,7 @@ GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](h
 
 | 项 | 值 |
 |---|---|
-| 镜像 | `ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix4` |
+| 镜像 | `ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix5` |
 | 最小资源 | 1 核 / 512MB（推荐 1核1GB+） |
 | Env | `DSH_HOME=/data`、`PORT=3080`、`DSH_TELEMETRY_DISABLED=1`、`DSH_AUTH_PASSWORD=<密码>`、`DSH_MANUAL_OAUTH=1`（公网账号登录） |
 | 持久卷 | 挂载路径 `/data`（与 DSH_HOME 一致），子路径 `dsh`，目录类型 |
@@ -140,10 +154,10 @@ GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](h
 
 ```sh
 # 构建（默认 npm 包 0.2.2-rc.1；换版本：--build-arg DSH_VERSION=<version>）
-docker build -t deepseek-harness:0.2.2-rc.1-fix4 .
+docker build -t deepseek-harness:0.2.2-rc.1-fix5 .
 
 # 冒烟测试（网关/登录/沙箱/持久化/legacy/健康，全过才退出 0）
-./smoke-test.sh deepseek-harness:0.2.2-rc.1-fix4
+./smoke-test.sh deepseek-harness:0.2.2-rc.1-fix5
 
 # 推送新 tag 到 GitHub Container Registry
 GHCR_USERNAME=<用户> GHCR_TOKEN=<令牌> DSH_VERSION=0.2.2-rc.1 ./push.sh
@@ -160,7 +174,8 @@ GHCR_USERNAME=<用户> GHCR_TOKEN=<令牌> DSH_VERSION=0.2.2-rc.1 ./push.sh
 |---|---|
 | 日志报 `mkdir: cannot create directory '/data/profiles': Permission denied` | 旧镜像的已知问题；用当前镜像（`0.2.2-rc.1`）重新部署即自动修复。若雨云仍用缓存旧镜像（同 tag 更新不自动拉新），把镜像字段临时改为 `latest` 或删除应用重建 |
 | 报 `trustedHosts entry "http://..." is not a bare host` | 旧镜像才需要 `DSH_TRUSTED_HOSTS`；当前镜像的网关会自动处理 Host/Origin，删除该变量并升级镜像即可 |
-| 页面报 `crypto.randomUUID is not a function` | 仅旧版 dsh（<=0.1.0-rc.6）需要 polyfill；0.2.2-rc.1 已不再调用该 API，升级镜像即可解决 |
+| 页面报 `crypto.randomUUID is not a function` | 旧版 dsh（<=0.1.0-rc.6）的已知问题；当前镜像已内置该 polyfill，升级镜像即可解决 |
+| 密码登录成功后页面白屏（Chrome 91 等旧 WebView） | 前端含 `static {}` 类静态块，Chrome 94 以下无法解析，SPA 整体不启动；当前镜像会在构建期转译到 Chrome 90 语法并注入运行时 polyfill，升级镜像即可解决 |
 | agent 无法执行命令，报 `SANDBOX_UNAVAILABLE` | 宿主内核不支持 Landlock（5.13+）；确认容器安全上下文是否放行 |
 | 登录失败 10 次被锁 | 防爆破机制，5 分钟后自动解锁 |
 
@@ -172,7 +187,7 @@ GHCR_USERNAME=<用户> GHCR_TOKEN=<令牌> DSH_VERSION=0.2.2-rc.1 ./push.sh
 ├── Dockerfile                  # 多阶段构建（node:24-trixie-slim + npm 官方包）
 ├── docker-entrypoint.sh        # 入口：卷属主自愈 → profile 补丁 → 回环启动 dsh + 网关
 ├── auth-proxy.js               # 内置密码登录网关（零依赖；含 /oauth/manual 手动回调桥接）
-├── polyfill-randomuuid.mjs     # 旧版（<=0.1.0-rc.6）兼容垫片，当前构建不注入
+├── patch-browser-compat.mjs    # 构建期浏览器兼容：前端转译到 Chrome 90 语法 + 注入旧 WebView polyfill
 ├── patch-trust-fence.mjs       # 构建期补丁：可选关闭 /api 信任围栏（DSH_TRUST_FENCE=0 构建参数）
 ├── patch-remote-oauth.mjs      # 构建期补丁：OAuth 回调（默认任意 HTTP(S)，DSH_MANUAL_OAUTH=1 强制 loopback）
 ├── local-proxy.mjs             # 可选：在浏览器本机把 loopback 转发到远端网关

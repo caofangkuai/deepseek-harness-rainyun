@@ -21,6 +21,15 @@ RUN apt-get update \
  && npm install -g @deepseek-ai/dsh@${DSH_VERSION} --no-audit --no-fund \
       --allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs
 
+# Browser compatibility: dsh's bundle targets modern browsers (class static
+# blocks, Object.hasOwn, Array.prototype.at, URL.canParse). Transpile the
+# frontend to Chrome 90 syntax and inject runtime polyfills so Chrome 91
+# WebViews boot instead of showing a blank page after login. esbuild stays in
+# this stage and is not copied into the runtime image.
+RUN npm install --prefix /opt/esbuild esbuild@0.25.0 --no-audit --no-fund
+COPY patch-browser-compat.mjs /opt/patch-browser-compat.mjs
+RUN node /opt/patch-browser-compat.mjs
+
 # ── stage 2: runtime ────────────────────────────────────────────────────────
 FROM node:24-trixie-slim
 ENV NODE_ENV=production \
@@ -46,9 +55,7 @@ COPY --from=dsh-install /usr/local/lib/node_modules /usr/local/lib/node_modules
 
 # Optional build-time patch to disable the /api browser-trust fence
 # (DSH_TRUST_FENCE=0). The gate already rewrites Host and strips Origin, so the
-# default fence works without any trusted-host configuration. dsh 0.2.2-rc.1 no
-# longer calls the unguarded crypto.randomUUID() that older releases needed a
-# browser polyfill for, so the polyfill step is dropped.
+# default fence works without any trusted-host configuration.
 COPY patch-trust-fence.mjs /usr/local/bin/
 RUN node /usr/local/bin/patch-trust-fence.mjs
 

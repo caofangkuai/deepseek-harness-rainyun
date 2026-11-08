@@ -83,7 +83,16 @@ jobs:
           # login, then follow dsh's launch-token redirect with the cookie jar
           JAR=$(mktemp)
           curl -s -c "$JAR" -o /dev/null -X POST -d 'password=SmokePass123' http://127.0.0.1:3081/login
-          curl -s -L -b "$JAR" -c "$JAR" http://127.0.0.1:3081/ | grep -q '__DSH_BOOT__'
+          for i in $(seq 1 40); do
+            curl -s -L -b "$JAR" -c "$JAR" http://127.0.0.1:3081/ | grep -q '__DSH_BOOT__' && break
+            sleep 1
+          done
+          curl -s -L -b "$JAR" -c "$JAR" http://127.0.0.1:3081/ > /tmp/smoke-index.html
+          grep -q '__DSH_BOOT__' /tmp/smoke-index.html
+          grep -q 'browser compat polyfills' /tmp/smoke-index.html
+          grep -q 'Promise.withResolvers' /tmp/smoke-index.html
+          ! docker exec smoke grep -Rq 'static{' \
+            /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/assets
           # manual OAuth bridge is behind the gate; an authenticated GET renders it
           curl -s -o /dev/null -w '%{http_code}' -H 'Accept: text/html' http://127.0.0.1:3081/oauth/manual | grep -q '302'
           curl -s -o /dev/null -w '%{http_code}' -b "$JAR" http://127.0.0.1:3081/oauth/manual | grep -q '200'

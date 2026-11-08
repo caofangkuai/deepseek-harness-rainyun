@@ -14,7 +14,7 @@
 #   - healthcheck healthy
 set -euo pipefail
 
-IMAGE="${1:-deepseek-harness:0.2.2-rc.1-fix4}"
+IMAGE="${1:-deepseek-harness:0.2.2-rc.1-fix5}"
 NAME="dsh-smoke"
 VOL="dsh-smoke-data"
 PORT="${SMOKE_PORT:-3081}"
@@ -24,6 +24,19 @@ FAILED=0
 say()  { printf '\n==> %s\n' "$*"; }
 ok()   { printf '    [PASS] %s\n' "$*"; }
 fail() { printf '    [FAIL] %s\n' "$*"; FAILED=1; }
+
+# dsh may accept the TCP connection a moment before its static handler serves
+# the boot manifest; retry briefly instead of making the smoke test flaky.
+wait_boot() {
+  local jar="$1" i
+  for i in $(seq 1 40); do
+    if curl -s -L -c "$jar" -b "$jar" "http://127.0.0.1:$PORT/" | grep -q '__DSH_BOOT__'; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
 
 cleanup() {
   docker rm -f "$NAME" >/dev/null 2>&1 || true
@@ -80,13 +93,37 @@ JAR=$(mktemp)
 curl -s -D /tmp/smoke-h -o /dev/null -c "$JAR" -X POST -d "password=$PASSWORD" "http://127.0.0.1:$PORT/login"
 COOKIE=$(grep -i '^set-cookie:' /tmp/smoke-h | sed 's/^[Ss]et-[Cc]ookie: //' | cut -d';' -f1)
 [ -n "$COOKIE" ] && ok "login issues session cookie" || fail "no cookie"
-curl -s -L -c "$JAR" -b "$JAR" "http://127.0.0.1:$PORT/" | grep -q '__DSH_BOOT__' \
+wait_boot "$JAR" \
   && ok "authenticated page served with __DSH_BOOT__" || fail "no boot manifest"
 code=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" "http://127.0.0.1:$PORT/api/health")
 if [ "$code" != "401" ] && [ "$code" != "403" ]; then
   ok "authenticated /api forwarded through gate (passed auth + fence, status $code)"
 else
   fail "authenticated /api -> $code"
+fi
+
+say "browser compatibility (Chrome 91 WebView)"
+curl -s -L -c "$JAR" -b "$JAR" "http://127.0.0.1:$PORT/" > /tmp/smoke-index.html
+grep -q 'dsh-docker: browser compat polyfills' /tmp/smoke-index.html \
+  && ok "index.html ships the browser polyfill" || fail "browser polyfill missing"
+grep -q 'Object.hasOwn' /tmp/smoke-index.html \
+  && ok "Object.hasOwn polyfill present" || fail "Object.hasOwn polyfill missing"
+grep -q 'URL.canParse' /tmp/smoke-index.html \
+  && ok "URL.canParse polyfill present" || fail "URL.canParse polyfill missing"
+if node -e 'const s=require("fs").readFileSync("/tmp/smoke-index.html","utf8");const p=s.indexOf("dsh-docker: browser compat polyfills");const m=s.indexOf("type=\"module\"");process.exit(p>=0&&m>=0&&p<m?0:1)'; then
+  ok "polyfill runs before the module bundle"
+else
+  fail "polyfill is missing or runs after the module bundle"
+fi
+if docker exec "$NAME" node -e '
+const fs=require("fs"),path=require("path");
+const dir="/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/assets";
+let bad=[];
+(function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(p.endsWith(".js")&&fs.readFileSync(p,"utf8").includes("static{"))bad.push(p)}})(dir);
+if(bad.length){console.error(bad.join("\n"));process.exit(1)}'; then
+  ok "no class static blocks remain in any JS asset"
+else
+  fail "class static blocks still present"
 fi
 
 say "websocket upgrade"
@@ -146,7 +183,7 @@ JAR2=$(mktemp)
 curl -s -o /dev/null -w '%{http_code}' -c "$JAR2" -X POST -d "password=$PASSWORD" "http://127.0.0.1:$PORT/login" > /tmp/smoke-code
 [ "$(cat /tmp/smoke-code)" = "302" ] \
   && ok "login works after restart" || fail "login after restart -> $(cat /tmp/smoke-code)"
-curl -s -L -c "$JAR2" -b "$JAR2" "http://127.0.0.1:$PORT/" | grep -q '__DSH_BOOT__' \
+wait_boot "$JAR2" \
   && ok "page boots after restart (fresh dsh launch token)" || fail "page boot after restart failed"
 
 say "legacy mode (DSH_AUTH=0) boots without a password via gate pass-through"
@@ -159,7 +196,7 @@ for i in $(seq 1 40); do
   sleep 1
 done
 JAR3=$(mktemp)
-curl -s -L -c "$JAR3" -b "$JAR3" "http://127.0.0.1:$PORT/" | grep -q '__DSH_BOOT__' \
+wait_boot "$JAR3" \
   && ok "legacy direct access works (no password, gate pass-through)" || fail "legacy boot failed"
 
 say "final health"
