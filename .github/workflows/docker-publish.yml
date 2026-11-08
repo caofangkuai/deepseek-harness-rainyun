@@ -91,6 +91,7 @@ jobs:
           grep -q '__DSH_BOOT__' /tmp/smoke-index.html
           grep -q 'browser compat polyfills' /tmp/smoke-index.html
           grep -q 'Promise.withResolvers' /tmp/smoke-index.html
+          grep -q 'throwIfAborted' /tmp/smoke-index.html
           ! docker exec smoke grep -Rq 'static{' \
             /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/assets
           # manual OAuth bridge is behind the gate; an authenticated GET renders it

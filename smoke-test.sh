@@ -14,7 +14,7 @@
 #   - healthcheck healthy
 set -euo pipefail
 
-IMAGE="${1:-deepseek-harness:0.2.2-rc.1-fix5}"
+IMAGE="${1:-deepseek-harness:0.2.2-rc.1-fix6}"
 NAME="dsh-smoke"
 VOL="dsh-smoke-data"
 PORT="${SMOKE_PORT:-3081}"
@@ -110,6 +110,8 @@ grep -q 'Object.hasOwn' /tmp/smoke-index.html \
   && ok "Object.hasOwn polyfill present" || fail "Object.hasOwn polyfill missing"
 grep -q 'URL.canParse' /tmp/smoke-index.html \
   && ok "URL.canParse polyfill present" || fail "URL.canParse polyfill missing"
+grep -q 'throwIfAborted' /tmp/smoke-index.html \
+  && ok "AbortSignal.throwIfAborted polyfill present" || fail "AbortSignal.throwIfAborted polyfill missing"
 if node -e 'const s=require("fs").readFileSync("/tmp/smoke-index.html","utf8");const p=s.indexOf("dsh-docker: browser compat polyfills");const m=s.indexOf("type=\"module\"");process.exit(p>=0&&m>=0&&p<m?0:1)'; then
   ok "polyfill runs before the module bundle"
 else

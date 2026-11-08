@@ -16,7 +16,7 @@
 | 🔐 **内置密码登录** | 首次访问注册密码，之后需登录（默认开启，`DSH_AUTH=0` 可关闭） |
 | 💾 **持久卷自愈** | 自动修复 root 属主卷（K8s/雨云不继承镜像属主的问题），幂等、重启不重复 chown |
 | 🌐 **免配置公网访问** | 鉴权模式下 dsh 只监听回环地址，网关自动处理 Host/Origin，无需填公网地址 |
-| 🧩 **旧浏览器兼容** | 构建期把前端转译到 Chrome 90 语法，并注入 `Object.hasOwn` / `.at` / `URL.canParse` / `Promise.withResolvers` / `AbortSignal.any` / `crypto.randomUUID` 等 polyfill（Chrome 91 WebView、微信内置浏览器等也能正常启动） |
+| 🧩 **旧浏览器兼容** | 构建期把前端转译到 Chrome 90 语法，并注入 `Object.hasOwn` / `.at` / `URL.canParse` / `Promise.withResolvers` / `AbortSignal.any` / `AbortSignal.throwIfAborted` / `crypto.randomUUID` 等 polyfill（Chrome 91 WebView、微信内置浏览器等也能正常启动并建立连接） |
 | 🔒 **默认 root 运行** | dsh 与鉴权网关默认以 root 启动；如需降权设置 `DSH_RUNTIME_UID=1000`，bash 工具仍走 Landlock 沙箱 |
 | 🚀 **多阶段构建** | 基于 npm 官方包 `@deepseek-ai/dsh`，原生依赖构建期编译，运行镜像精简 |
 
@@ -28,7 +28,7 @@
 docker run -d --name dsh \
   -p 3080:3080 \
   -v dsh-data:/data \
-  ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix5
+  ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix6
 ```
 
 打开 http://localhost:3080 ：
@@ -44,7 +44,7 @@ docker run -d --name dsh \
 ```yaml
 services:
   dsh:
-    image: ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix5
+    image: ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix6
     container_name: dsh
     restart: unless-stopped
     ports:
@@ -71,12 +71,12 @@ volumes:
 
 ## 旧浏览器兼容
 
-dsh 0.2.2-rc.1 的前端默认按现代浏览器构建，包含 `static {}` 类静态块（Chrome 94+）、`Object.hasOwn`（Chrome 93+）、`Array.prototype.at`（Chrome 92+）、`URL.canParse`（Chrome 120+）等语法/API。Chrome 91 等旧 WebView 会在解析阶段直接失败，表现为密码登录成功后整页白屏。
+dsh 0.2.2-rc.1 的前端默认按现代浏览器构建，包含 `static {}` 类静态块（Chrome 94+）、`Object.hasOwn`（Chrome 93+）、`Array.prototype.at`（Chrome 92+）、`URL.canParse`（Chrome 120+）、`AbortSignal.prototype.throwIfAborted`（Chrome 100+）等语法/API。旧 WebView 会先因语法解析失败表现为登录后白屏；修掉语法后，又会因缺少 `throwIfAborted` 卡在“连接中”。
 
 镜像构建阶段会做两件事：
 
 - 用 esbuild 把 `dist/assets` 下全部 JS 转译到 Chrome 90 语法，去掉 `static {}` 等旧引擎无法解析的语法；
-- 在 `index.html` 的模块脚本之前注入经典 `<script>` polyfill，覆盖 `Object.hasOwn`、`Array.prototype.at` / `String.prototype.at`、`URL.canParse` / `URL.parse`、`Promise.withResolvers` / `Promise.try`、`AbortSignal.any` / `AbortSignal.timeout`、`findLast`、`toSorted`、`Object.groupBy`、`crypto.randomUUID` 等缺失 API。
+- 在 `index.html` 的模块脚本之前注入经典 `<script>` polyfill，覆盖 `Object.hasOwn`、`Array.prototype.at` / `String.prototype.at`、`URL.canParse` / `URL.parse`、`Promise.withResolvers` / `Promise.try`、`AbortSignal.any` / `AbortSignal.timeout` / `AbortSignal.prototype.throwIfAborted`、`findLast`、`toSorted`、`Object.groupBy`、`crypto.randomUUID` 等缺失 API。
 
 polyfill 只在原生 API 不存在时安装，现代浏览器行为不变。
 
@@ -88,7 +88,8 @@ GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](h
 
 | Tag | 说明 |
 |---|---|
-| `0.2.2-rc.1-fix5` | **当前推荐**：fix4 + 旧浏览器兼容。构建期把前端转译到 Chrome 90 语法并注入运行时 polyfill，Chrome 91 WebView / 微信内置浏览器登录后不再白屏 |
+| `0.2.2-rc.1-fix6` | **当前推荐**：fix5 + `AbortSignal.prototype.throwIfAborted` polyfill。修复旧 WebView 登录后一直显示“连接中”的问题（dsh 客户端调用该 API 建立 mux 连接） |
+| `0.2.2-rc.1-fix5` | 0.2.2-rc.1 + 旧浏览器兼容首版：转译 Chrome 90 语法并注入基础 polyfill，解决登录后白屏；旧 WebView 仍会因缺少 `throwIfAborted` 停在“连接中” |
 | `0.2.2-rc.1-fix4` | 0.2.2-rc.1 + WebSocket 修复 + 手动回调桥接。设 `DSH_MANUAL_OAUTH=1` 后账号登录强制使用 loopback `redirect_uri`，浏览器跳转失败后把地址栏 URL 粘贴到 `/oauth/manual` 即可完成登录 |
 | `0.2.2-rc.1-fix3` | 0.2.2-rc.1 + WebSocket 修复 + 远程 OAuth 补丁（dsh 侧放行任意 HTTP(S) origin；Platform 仍拒绝公网回调，公开账号登录不可用） |
 | `0.2.2-rc.1-fix2` | 0.2.2-rc.1 + WebSocket 修复 + 远程 OAuth 补丁（仅 `DSH_PUBLIC_ORIGIN` 白名单） |
@@ -132,7 +133,7 @@ GitHub Container Registry（公开）：[ghcr.io/caofangkuai/deepseek-harness](h
 
 | 项 | 值 |
 |---|---|
-| 镜像 | `ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix5` |
+| 镜像 | `ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix6` |
 | 最小资源 | 1 核 / 512MB（推荐 1核1GB+） |
 | Env | `DSH_HOME=/data`、`PORT=3080`、`DSH_TELEMETRY_DISABLED=1`、`DSH_AUTH_PASSWORD=<密码>`、`DSH_MANUAL_OAUTH=1`（公网账号登录） |
 | 持久卷 | 挂载路径 `/data`（与 DSH_HOME 一致），子路径 `dsh`，目录类型 |

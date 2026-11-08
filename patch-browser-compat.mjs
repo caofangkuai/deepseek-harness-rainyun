@@ -5,6 +5,7 @@
 //   - Object.hasOwn (Chrome 93+)
 //   - Array.prototype.at / String.prototype.at (Chrome 92+)
 //   - URL.canParse (Chrome 120+)
+//   - AbortSignal.prototype.throwIfAborted (Chrome 100+)
 //   - crypto.randomUUID (Chrome 92+)
 //
 // Older WebViews (for example the Android WebView 91.0.4472.114) fail to parse
@@ -107,6 +108,23 @@ const POLYFILL = `<script>
         }, ms);
         return controller.signal;
       };
+    }
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.prototype.throwIfAborted !== 'function') {
+      Object.defineProperty(AbortSignal.prototype, 'throwIfAborted', {
+        value: function throwIfAborted() {
+          if (this.aborted) {
+            var reason;
+            try { reason = this.reason; } catch (e) {}
+            if (reason === undefined) {
+              try { reason = new DOMException('This operation was aborted', 'AbortError'); }
+              catch (e) { reason = new Error('This operation was aborted'); }
+            }
+            throw reason;
+          }
+        },
+        configurable: true,
+        writable: true
+      });
     }
     if (typeof Array.prototype.findLast !== 'function') {
       Object.defineProperty(Array.prototype, 'findLast', {

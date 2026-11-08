@@ -22,8 +22,8 @@
 
 | 字段 | 值 | 说明 |
 |---|---|---|
-| 版本号 | `0.2.2-rc.1-fix5` | 与镜像 tag 保持一致 |
-| 镜像 | `ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix5` | 已推送到 ghcr.io（公开），也可用 `:latest`。注意：当前为 **linux/amd64** 单架构镜像，雨云 x86_64 节点可直接拉取；若雨云给 arm64 节点，需先构建多架构镜像 |
+| 版本号 | `0.2.2-rc.1-fix6` | 与镜像 tag 保持一致 |
+| 镜像 | `ghcr.io/caofangkuai/deepseek-harness:0.2.2-rc.1-fix6` | 已推送到 ghcr.io（公开），也可用 `:latest`。注意：当前为 **linux/amd64** 单架构镜像，雨云 x86_64 节点可直接拉取；若雨云给 arm64 节点，需先构建多架构镜像 |
 | 最小CPU | `1` 核 | Node 服务，1 核可跑 |
 | 最小内存 | `512` MB | 推荐给用户写 1GB，agent 跑任务更从容 |
 
